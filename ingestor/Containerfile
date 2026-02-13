@@ -1,0 +1,19 @@
+# Containerfile
+
+# Use an official lightweight Python image as a base
+FROM python:3.11-slim
+
+# Set the working directory inside the container
+WORKDIR /app
+
+# Copy the requirements file first to leverage layer caching
+COPY requirements.txt .
+
+# Install the Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the rest of the application code into the container
+COPY ingest_nw_data.py .
+
+# Command to run when the container starts
+CMD ["python", "-u", "ingest_nw_data.py"]

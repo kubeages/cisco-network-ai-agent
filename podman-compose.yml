@@ -1,0 +1,142 @@
+# ==============================================================================
+# Network AI Agent - Podman/Docker Compose Orchestration
+# ==============================================================================
+#
+# This file defines and orchestrates the multi-container application that forms
+# the Network AI Agent. It uses podman-compose to manage four distinct
+# services that work together to provide the full functionality of the system.
+#
+# ------------------------------------------------------------------------------
+# Service Architecture:
+# ------------------------------------------------------------------------------
+#
+# 1. neo4j (The Memory):
+#    - A Neo4j graph database that serves as the persistent knowledge base or
+#      "memory" for the AI agent.
+#    - It stores the network topology, configuration, and operational state data.
+#    - Its ports are exposed to the host for direct database access and monitoring.
+#
+# 2. nw-data-ingestor (The Collector):
+#    - A recurring, long-running Python service that periodically fetches data
+#      from network sources (APIC and Nexus Dashboard).
+#    - It processes, correlates, and synchronizes this data with the Neo4j graph,
+#      ensuring the agent's knowledge is always up-to-date.
+#    - It is configured to run as a continuous service, not a one-off task.
+#
+# 3. backend-api (The Brain):
+#    - A FastAPI application that contains the core AI logic, built with LangChain.
+#    - It receives user questions, translates them into Cypher queries for the
+#      Neo4j database, and synthesizes the results into natural language answers.
+#    - It can be configured to use either a local LLM or the OpenAI API.
+#
+# 4. frontend-app (The Face):
+#    - A Gradio web application that provides the user interface for the agent.
+#    - It presents a conversational chat interface and communicates with the
+#      backend-api to get responses.
+#    - This is the only service whose UI port (7860) is exposed to the user.
+#
+# ------------------------------------------------------------------------------
+# Networking:
+# ------------------------------------------------------------------------------
+# - All services are connected to a single bridge network (`gbaia-nw`), allowing
+#   them to communicate with each other using their service names as hostnames
+#   (e.g., `bolt://neo4j-graph-db:7687`, `http://backend-api:8000`).
+#
+# ==============================================================================
+
+version: '3.8'
+
+networks:
+  gbaia-nw:
+    driver: bridge
+
+services:
+  # ──────────────────────────────────────────────────────────────
+  # 1️⃣ Graph DB (neo4j)
+  # ──────────────────────────────────────────────────────────────
+  neo4j:
+    image: neo4j:5    
+    container_name: neo4j-graph-db
+    environment:
+      - NEO4J_AUTH=<NEO4J_USER>/<NEO4J_PASSWORD>
+      - NEO4J_PLUGINS=["apoc"]      
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - ./neo4j/data:/data:Z
+      - ./neo4j/logs:/logs:Z
+      - ./neo4j/conf:/conf:Z
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u NEO4J_USER -p NEO4J_PASSWORD 'RETURN 1'"]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+    networks:
+      - gbaia-nw
+    restart: unless-stopped   
+
+  # ──────────────────────────────────────────────────────────────  
+  # 2️⃣ Network Data Ingestor (periodic task)
+  # ──────────────────────────────────────────────────────────────
+  apic-ingestor:
+    build: ./ingestor
+    container_name: nw-data-ingestor
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    environment:
+      # --- APIC Details ---
+      - APIC_URL=https://<APIC_IP_ADDRESS>
+      - APIC_USER=<APIC_USER>
+      - APIC_PASSWORD=<APIC_PASSWORD>
+      # --- Nexus Dashboard Details ---
+      - ND_URL=https://<ND_IP_ADDRESS>
+      - ND_USER=<ND_USER>
+      - ND_PASSWORD=<ND_PASSWORD>
+      # --- Neo4j Details ---
+      - NEO4J_URI=bolt://neo4j-graph-db:7687
+      - NEO4J_USER=<NEO4J_USER>
+      - NEO4J_PASSWORD=<NEO4J_PASSWORD>
+    networks:
+      - gbaia-nw
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────────────────────
+  # 3️⃣ Backend API (AI Agent logic)
+  # ──────────────────────────────────────────────────────────────
+  backend-api:
+    build: ./backend
+    container_name: backend-api
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    environment:
+      - OPENAI_API_KEY=<YOUR_OPENAI_API_KEY>
+      #- LOCAL_LLM_URL=https://<LOCAL_LLM_IP>:<PORT>  # Uncomment if using a local LLM
+      - NEO4J_URI=bolt://neo4j-graph-db:7687
+      - NEO4J_USER=<NEO4J_USER>
+      - NEO4J_PASSWORD=<NEO4J_PASSWORD>
+      # Splunk Observability (optional - set to "true" to enable)
+      - SPLUNK_OBSERVABILITY_ENABLED=false
+      #- OTEL_SERVICE_NAME=gbaia-backend
+      #- OTEL_ENVIRONMENT=development
+      #- OTEL_EXPORTER_OTLP_ENDPOINT=http://<OTEL_COLLECTOR>:4317
+      #- SPLUNK_ACCESS_TOKEN=<YOUR_SPLUNK_TOKEN>
+    networks:
+      - gbaia-nw
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────────────────────
+  # 4️⃣ Frontend App (AI Agent UI)
+  # ──────────────────────────────────────────────────────────────
+  frontend-app:
+    build: ./frontend
+    container_name: frontend-app
+    depends_on:
+      - backend-api
+    ports:
+      - "7860:7860" # Exposes UI on host machine
+    networks:
+      - gbaia-nw
+    restart: unless-stopped

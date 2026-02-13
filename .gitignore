@@ -1,0 +1,62 @@
+# =========================================
+# General .gitignore for Python Projects
+# =========================================
+
+# OS-specific files
+# -----------------
+.DS_Store
+Thumbs.db
+desktop.ini
+CLAUDE.md
+
+# Python
+# ------
+# Virtual Environments
+venv/
+env/
+.venv/
+.env/
+
+# Byte-compiled / optimized files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Environment files (often contain secrets)
+.env
+
+# IDEs and Editors
+# ----------------
+.vscode/
+.idea/
+.claude/
+
+# Testing & Coverage
+# ------------------
+.pytest_cache/
+.coverage
+
+# Private podman compose file
+# ---------------------------
+podman-compose-private.yml
+
+# neo4j folder (local data)
+# -------------------------
+neo4j/
+
+# Screenshots (demo captures)
+# ---------------------------
+screenshots/
+
+# Folders excluded from this commit (contain demo-specific content)
+# -----------------------------------------------------------------
+openshift/
+demo-flows/
+load_generator/
