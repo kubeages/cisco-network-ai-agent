@@ -620,7 +620,7 @@ def process_nexus_dashboard_data(driver, token, url):
 if __name__ == "__main__":
     print("🤖 Data ingestor started. Scheduling task...")
     
-    schedule.every(1).minutes.do(run_ingestion_job)
+    schedule.every(60).minutes.do(run_ingestion_job)
     
     print("👍 Task scheduled. Running the first ingestion right now...")
     run_ingestion_job()
