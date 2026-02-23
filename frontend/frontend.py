@@ -1399,6 +1399,9 @@ footer {
     color: #e6edf3;
     flex-shrink: 0;
 }
+#selected-node-display * {
+    color: #e6edf3 !important;
+}
 
 /* === REFRESH GRAPH BUTTON === */
 #refresh-btn {
@@ -1614,6 +1617,9 @@ footer {
     background: rgba(9, 105, 218, 0.06);
     border: 1px solid rgba(9, 105, 218, 0.18);
     color: #0550ae;
+}
+.light-mode #selected-node-display * {
+    color: #0550ae !important;
 }
 .light-mode #refresh-btn {
     background: rgba(9, 105, 218, 0.08) !important;
