@@ -66,20 +66,20 @@ BACKEND_STREAM_URL = "http://backend-api:8000/ask/stream"
 SUGGESTIONS_URL = "http://backend-api:8000/suggestions"
 GRAPH_URL = "http://backend-api:8000/graph"
 
-# Node styling configuration - Modern dark theme colors
+# Node styling configuration - J.A.R.V.I.S. cyan/teal palette
 NODE_COLORS = {
-    "Tenant": "#58a6ff",      # Soft blue
-    "AppProfile": "#7ee787",  # Mint green
-    "EPG": "#56d364",         # Bright green
-    "Fabric": "#f0883e",      # Warm orange
-    "Anomaly": "#ff7b72",     # Soft red
-    "HealthSummary": "#bc8cff", # Light purple
-    "VRF": "#a371f7",         # Purple
-    "BridgeDomain": "#39d353", # Green
-    "Subnet": "#79c0ff",      # Light blue
-    "Node": "#d2a8ff",        # Lavender
-    "Fault": "#ffa657",       # Orange
-    "Advisory": "#d29922",    # Gold
+    "Tenant": "#00d4ff",      # Cyan (primary accent)
+    "AppProfile": "#00e5a0",  # Teal green
+    "EPG": "#00c9b7",         # Aqua
+    "Fabric": "#f0883e",      # Warm orange (central hub)
+    "Anomaly": "#ff5757",     # Alert red
+    "HealthSummary": "#a78bfa", # Soft purple
+    "VRF": "#818cf8",         # Indigo
+    "BridgeDomain": "#34d399", # Emerald
+    "Subnet": "#67e8f9",      # Light cyan
+    "Node": "#c4b5fd",        # Lavender
+    "Fault": "#fb923c",       # Orange
+    "Advisory": "#fbbf24",    # Amber
     "Unknown": "#8b949e",     # Gray
 }
 
@@ -221,8 +221,8 @@ def generate_graph_html():
         }}
         #legend {{
             position: absolute;
-            top: 12px;
-            left: 12px;
+            top: 56px;
+            right: 12px;
             display: flex;
             flex-direction: column;
             gap: 8px;
@@ -248,8 +248,8 @@ def generate_graph_html():
             font-weight: 500;
         }}
         .legend-item:hover {{
-            background: rgba(88, 166, 255, 0.2);
-            border-color: #58a6ff;
+            background: rgba(0, 212, 255, 0.2);
+            border-color: #00d4ff;
         }}
         .legend-item.inactive {{
             opacity: 0.35;
@@ -262,20 +262,22 @@ def generate_graph_html():
         }}
         #click-hint {{
             position: absolute;
-            bottom: 12px;
-            left: 12px;
+            bottom: 50px;
+            left: 50%;
+            transform: translateX(-50%);
             background: rgba(33, 38, 45, 0.9);
             color: #8b949e;
             padding: 8px 14px;
             border-radius: 6px;
             font-size: 11px;
             border: 1px solid rgba(240,246,252,0.1);
+            white-space: nowrap;
         }}
         #reset-btn {{
             position: absolute;
-            bottom: 12px;
+            bottom: 50px;
             right: 12px;
-            background: linear-gradient(135deg, #58a6ff 0%, #1f6feb 100%);
+            background: linear-gradient(135deg, #00d4ff 0%, #0088cc 100%);
             color: #fff;
             padding: 8px 16px;
             border-radius: 6px;
@@ -285,11 +287,11 @@ def generate_graph_html():
             cursor: pointer;
             display: none;
             z-index: 200;
-            box-shadow: 0 4px 12px rgba(88, 166, 255, 0.3);
+            box-shadow: 0 4px 12px rgba(0, 212, 255, 0.3);
         }}
         #reset-btn:hover {{
             transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(88, 166, 255, 0.4);
+            box-shadow: 0 6px 20px rgba(0, 212, 255, 0.4);
         }}
         .anomaly-group {{
             display: flex;
@@ -313,6 +315,50 @@ def generate_graph_html():
             flex-wrap: wrap;
             gap: 4px;
         }}
+        /* Force tooltip wrapper to be fully transparent */
+        .float-tooltip-kap,
+        .scene-tooltip, .graph-tooltip,
+        div[class*="tooltip"],
+        #3d-graph > div:not(canvas) {{
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            max-width: none !important;
+            border-radius: 0 !important;
+            font: inherit !important;
+            color: inherit !important;
+        }}
+        /* Light mode overrides */
+        body.light-mode {{
+            background: #d5dce8;
+        }}
+        body.light-mode .legend-item {{
+            background: rgba(255, 255, 255, 0.9);
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            color: #1f2328;
+        }}
+        body.light-mode .legend-item:hover {{
+            background: rgba(9, 105, 218, 0.12);
+            border-color: #0969da;
+        }}
+        body.light-mode .legend-item.inactive {{
+            opacity: 0.35;
+        }}
+        body.light-mode #click-hint {{
+            background: rgba(255, 255, 255, 0.9);
+            color: #656d76;
+            border: 1px solid rgba(0, 0, 0, 0.1);
+        }}
+        body.light-mode #reset-btn {{
+            background: linear-gradient(135deg, #0969da 0%, #0550ae 100%);
+            box-shadow: 0 4px 12px rgba(9, 105, 218, 0.3);
+        }}
+        body.light-mode .anomaly-group {{
+            border: 1px solid rgba(248, 81, 73, 0.2);
+            background: rgba(248, 81, 73, 0.05);
+        }}
     </style>
 </head>
 <body>
@@ -326,37 +372,37 @@ def generate_graph_html():
             </div>
             <div class="legend-item" data-type="Tenant">
                 <svg width="16" height="16" viewBox="0 0 16 16" class="legend-shape">
-                    <rect x="2" y="2" width="12" height="12" fill="#58a6ff"/>
+                    <rect x="2" y="2" width="12" height="12" fill="#00d4ff"/>
                 </svg>Tenant
             </div>
             <div class="legend-item" data-type="Node">
                 <svg width="16" height="16" viewBox="0 0 16 16" class="legend-shape">
-                    <rect x="3" y="2" width="10" height="12" rx="3" fill="#d2a8ff"/>
+                    <rect x="3" y="2" width="10" height="12" rx="3" fill="#c4b5fd"/>
                 </svg>Node
             </div>
             <div class="legend-item" data-type="VRF">
                 <svg width="16" height="16" viewBox="0 0 16 16" class="legend-shape">
-                    <polygon points="8,1 14,4 14,12 8,15 2,12 2,4" fill="#a371f7"/>
+                    <polygon points="8,1 14,4 14,12 8,15 2,12 2,4" fill="#818cf8"/>
                 </svg>VRF
             </div>
             <div class="legend-item" data-type="BridgeDomain">
                 <svg width="16" height="16" viewBox="0 0 16 16" class="legend-shape">
-                    <rect x="1" y="5" width="14" height="6" fill="#39d353"/>
+                    <rect x="1" y="5" width="14" height="6" fill="#34d399"/>
                 </svg>BD
             </div>
             <div class="legend-item" data-type="Subnet">
                 <svg width="16" height="16" viewBox="0 0 16 16" class="legend-shape">
-                    <circle cx="8" cy="8" r="5" fill="#79c0ff"/>
+                    <circle cx="8" cy="8" r="5" fill="#67e8f9"/>
                 </svg>Subnet
             </div>
             <div class="legend-item" data-type="AppProfile">
                 <svg width="16" height="16" viewBox="0 0 16 16" class="legend-shape">
-                    <polygon points="8,1 13,4 13,11 8,15 3,11 3,4" fill="#7ee787"/>
+                    <polygon points="8,1 13,4 13,11 8,15 3,11 3,4" fill="#00e5a0"/>
                 </svg>App
             </div>
             <div class="legend-item" data-type="EPG">
                 <svg width="16" height="16" viewBox="0 0 16 16" class="legend-shape">
-                    <circle cx="8" cy="8" r="6" fill="#56d364"/>
+                    <circle cx="8" cy="8" r="6" fill="#00c9b7"/>
                 </svg>EPG
             </div>
             <div class="legend-item inactive" data-type="Orphans" id="orphans-toggle">
@@ -391,12 +437,12 @@ def generate_graph_html():
                     </div>
                     <div class="legend-item" data-type="Fault">
                         <svg width="16" height="16" viewBox="0 0 16 16" class="legend-shape">
-                            <polygon points="8,14 1,2 15,2" fill="#ffa657"/>
+                            <polygon points="8,14 1,2 15,2" fill="#fb923c"/>
                         </svg>Fault
                     </div>
                     <div class="legend-item" data-type="Advisory">
                         <svg width="16" height="16" viewBox="0 0 16 16" class="legend-shape">
-                            <circle cx="8" cy="8" r="5" fill="none" stroke="#d29922" stroke-width="3"/>
+                            <circle cx="8" cy="8" r="5" fill="none" stroke="#fbbf24" stroke-width="3"/>
                         </svg>Advisory
                     </div>
                 </div>
@@ -404,8 +450,53 @@ def generate_graph_html():
         </div>
     </div>
     <button id="reset-btn">Reset View</button>
-    <div id="click-hint">Click node to explore | Drag to rotate | Scroll to zoom</div>
+    <div id="click-hint">Click node to explore | Left-drag to rotate | Right-drag to pan | Scroll to zoom</div>
     <script>
+        // Theme support
+        var currentTheme = 'dark';
+        var themeColors = {{
+            dark: {{
+                bg: '#0d1117',
+                tooltipBg: 'linear-gradient(180deg, rgba(34,40,52,0.97) 0%, rgba(16,20,28,0.98) 100%)',
+                tooltipBgFallback: 'rgba(22,27,34,0.97)',
+                tooltipBorderTop: 'rgba(100,200,255,0.30)',
+                tooltipBorderSide: 'rgba(240,246,252,0.10)',
+                tooltipBorderBottom: 'rgba(0,0,0,0.5)',
+                tooltipDropShadow: 'drop-shadow(0 4px 8px rgba(0,0,0,0.5)) drop-shadow(0 12px 32px rgba(0,0,0,0.4))',
+                tooltipBadgeBg: 'rgba(0, 212, 255, 0.15)',
+                tooltipBadgeText: '#00d4ff',
+                tooltipAccent: '#00d4ff',
+                tooltipTitle: '#fff',
+                tooltipSep: 'rgba(240,246,252,0.1)',
+                tooltipLabel: '#8b949e',
+                tooltipValue: '#e6edf3',
+                labelBg: 'rgba(13, 17, 23, 0.8)',
+                labelColor: '#e6edf3',
+                linkColor: 'rgba(0, 212, 255, 0.35)',
+                particleColor: '#00d4ff'
+            }},
+            light: {{
+                bg: '#d5dce8',
+                tooltipBg: 'linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(230,236,248,0.97) 100%)',
+                tooltipBgFallback: 'rgba(248,250,255,0.97)',
+                tooltipBorderTop: 'rgba(255,255,255,0.95)',
+                tooltipBorderSide: 'rgba(0,40,100,0.10)',
+                tooltipBorderBottom: 'rgba(0,30,80,0.20)',
+                tooltipDropShadow: 'drop-shadow(0 4px 8px rgba(0,40,100,0.12)) drop-shadow(0 12px 32px rgba(0,30,80,0.10))',
+                tooltipBadgeBg: 'rgba(5, 80, 174, 0.12)',
+                tooltipBadgeText: '#0550ae',
+                tooltipAccent: '#0550ae',
+                tooltipTitle: '#1a1a2e',
+                tooltipSep: 'rgba(0,0,0,0.1)',
+                tooltipLabel: '#4a5568',
+                tooltipValue: '#1a1a2e',
+                labelBg: 'rgba(255, 255, 255, 0.92)',
+                labelColor: '#1a1a2e',
+                linkColor: 'rgba(0, 90, 180, 0.35)',
+                particleColor: '#0969da'
+            }}
+        }};
+
         // Graph data
         var graphData = {{
             nodes: {nodes_json},
@@ -424,13 +515,14 @@ def generate_graph_html():
             canvas.height = 64;
 
             // Background
-            context.fillStyle = 'rgba(13, 17, 23, 0.8)';
+            var tc = themeColors[currentTheme];
+            context.fillStyle = tc.labelBg;
             context.roundRect(0, 0, canvas.width, canvas.height, 8);
             context.fill();
 
             // Text
             context.font = 'bold 24px Inter, Arial, sans-serif';
-            context.fillStyle = color || '#ffffff';
+            context.fillStyle = color || tc.labelColor;
             context.textAlign = 'center';
             context.textBaseline = 'middle';
 
@@ -520,7 +612,7 @@ def generate_graph_html():
             group.add(mesh);
 
             // Add text label below the shape
-            var label = createTextSprite(node.name, '#e6edf3');
+            var label = createTextSprite(node.name, themeColors[currentTheme].labelColor);
             label.position.set(0, -size * 2, 0);
             group.add(label);
 
@@ -533,30 +625,46 @@ def generate_graph_html():
             .graphData(graphData)
             .backgroundColor('#0d1117')
             .nodeLabel(node => {{
-                // HTML tooltip on hover
-                var html = '<div style="background: rgba(22,27,34,0.95); padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(240,246,252,0.2); max-width: 300px;">';
-                html += '<div style="color: #58a6ff; font-size: 10px; text-transform: uppercase; margin-bottom: 4px;">' + node.nodeType + '</div>';
-                html += '<div style="color: #fff; font-weight: 600; font-size: 14px; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid rgba(240,246,252,0.1);">' + (node.originalName || node.name) + '</div>';
+                // HTML tooltip on hover - 3D styled card
+                var tc = themeColors[currentTheme];
+                // Outer wrapper with drop-shadow
+                var html = '<div style="filter: ' + tc.tooltipDropShadow + ';">';
+                // Inner card with gradient, borders, highlight
+                html += '<div style="'
+                    + 'background: ' + tc.tooltipBgFallback + ';'
+                    + 'background: ' + tc.tooltipBg + ';'
+                    + 'padding: 14px 18px;'
+                    + 'border-radius: 12px;'
+                    + 'border-top: 1.5px solid ' + tc.tooltipBorderTop + ';'
+                    + 'border-left: 1px solid ' + tc.tooltipBorderSide + ';'
+                    + 'border-right: 1px solid ' + tc.tooltipBorderSide + ';'
+                    + 'border-bottom: 2.5px solid ' + tc.tooltipBorderBottom + ';'
+                    + 'max-width: 320px;'
+                    + '">';
+                // Node type badge with accent background
+                html += '<div style="display:inline-block; color: ' + tc.tooltipBadgeText + '; font-size: 9px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; padding: 3px 10px; border-radius: 6px; background: ' + tc.tooltipBadgeBg + '; font-weight: 700;">' + node.nodeType + '</div>';
+                // Node name
+                html += '<div style="color: ' + tc.tooltipTitle + '; font-weight: 700; font-size: 15px; margin-bottom: 10px; padding-bottom: 9px; border-bottom: 1px solid ' + tc.tooltipSep + ';">' + (node.originalName || node.name) + '</div>';
                 if (node.properties) {{
                     for (var key in node.properties) {{
                         if (node.properties[key] !== null && node.properties[key] !== '') {{
                             var val = node.properties[key];
                             if (typeof val === 'string' && val.length > 40) val = val.substring(0, 40) + '...';
-                            html += '<div style="color: #8b949e; font-size: 11px; margin: 2px 0;"><span style="color: #8b949e;">' + key + ':</span> <span style="color: #e6edf3;">' + val + '</span></div>';
+                            html += '<div style="font-size: 11px; margin: 3px 0; line-height: 1.5;"><span style="color: ' + tc.tooltipLabel + '; font-weight: 500;">' + key + ':</span> <span style="color: ' + tc.tooltipValue + '; font-weight: 400;">' + val + '</span></div>';
                         }}
                     }}
                 }}
-                html += '</div>';
+                html += '</div></div>';
                 return html;
             }})
             .nodeThreeObject(node => createNodeObject(node))
-            .linkColor(() => 'rgba(88, 166, 255, 0.4)')
+            .linkColor(() => 'rgba(0, 212, 255, 0.35)')
             .linkOpacity(0.6)
             .linkWidth(1.5)
             .linkDirectionalParticles(2)
             .linkDirectionalParticleSpeed(0.006)
             .linkDirectionalParticleWidth(2)
-            .linkDirectionalParticleColor(() => '#58a6ff')
+            .linkDirectionalParticleColor(() => '#00d4ff')
             .onNodeHover(node => {{
                 document.body.style.cursor = node ? 'pointer' : 'default';
             }})
@@ -755,6 +863,91 @@ def generate_graph_html():
 
             applyFilters();
         }});
+
+        // Theme change listener - receives messages from parent page
+        window.addEventListener('message', function(event) {{
+            if (event.data && event.data.type === 'themeChange') {{
+                currentTheme = event.data.theme;
+                var tc = themeColors[currentTheme];
+                var isLight = currentTheme === 'light';
+
+                // Update body class for CSS overrides
+                if (isLight) {{
+                    document.body.classList.add('light-mode');
+                }} else {{
+                    document.body.classList.remove('light-mode');
+                }}
+
+                // Update graph background
+                document.body.style.background = tc.bg;
+                Graph.backgroundColor(tc.bg);
+
+                // Update link colors
+                Graph.linkColor(function() {{ return tc.linkColor; }});
+                Graph.linkDirectionalParticleColor(function() {{ return tc.particleColor; }});
+
+                // Regenerate node objects for updated label colors
+                Graph.nodeThreeObject(function(node) {{ return createNodeObject(node); }});
+            }}
+        }});
+
+        // Check parent theme on initial load
+        setTimeout(function() {{
+            try {{
+                if (window.parent && window.parent.document.documentElement.classList.contains('light-mode')) {{
+                    currentTheme = 'light';
+                    var tc = themeColors[currentTheme];
+                    document.body.classList.add('light-mode');
+                    document.body.style.background = tc.bg;
+                    Graph.backgroundColor(tc.bg);
+                    Graph.linkColor(function() {{ return tc.linkColor; }});
+                    Graph.linkDirectionalParticleColor(function() {{ return tc.particleColor; }});
+                    Graph.nodeThreeObject(function(node) {{ return createNodeObject(node); }});
+                }}
+            }} catch(e) {{}}
+        }}, 500);
+
+        // Strip float-tooltip-kap wrapper styling via MutationObserver
+        // The 3d-force-graph lib uses float-tooltip which injects its own
+        // stylesheet with background/padding/border on .float-tooltip-kap.
+        // CSS !important may lose to the injected sheet, so we strip inline.
+        (function() {{
+            var graphEl = document.getElementById('3d-graph');
+            if (!graphEl) return;
+            function stripTooltipWrapper(el) {{
+                el.style.setProperty('background', 'transparent', 'important');
+                el.style.setProperty('border', 'none', 'important');
+                el.style.setProperty('box-shadow', 'none', 'important');
+                el.style.setProperty('padding', '0', 'important');
+                el.style.setProperty('margin', '0', 'important');
+                el.style.setProperty('max-width', 'none', 'important');
+                el.style.setProperty('border-radius', '0', 'important');
+                el.style.setProperty('font', 'inherit', 'important');
+                el.style.setProperty('color', 'inherit', 'important');
+            }}
+            // Watch for tooltip div being added or changed
+            var obs = new MutationObserver(function(mutations) {{
+                var tt = graphEl.querySelector('.float-tooltip-kap');
+                if (tt) stripTooltipWrapper(tt);
+                // Also catch any div that isn't the canvas
+                graphEl.querySelectorAll(':scope > div').forEach(function(d) {{
+                    if (!d.querySelector('canvas') && !d.id) {{
+                        stripTooltipWrapper(d);
+                    }}
+                }});
+            }});
+            obs.observe(graphEl, {{ childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] }});
+            // Also strip on first paint
+            setTimeout(function() {{
+                var tt = graphEl.querySelector('.float-tooltip-kap');
+                if (tt) stripTooltipWrapper(tt);
+                graphEl.querySelectorAll(':scope > div').forEach(function(d) {{
+                    if (!d.querySelector('canvas') && !d.id) {{
+                        stripTooltipWrapper(d);
+                    }}
+                }});
+            }}, 1000);
+        }})();
     </script>
 </body>
 </html>
@@ -763,7 +956,7 @@ def generate_graph_html():
     escaped_html = html.escape(inner_html, quote=True)
 
     # Wrap in iframe using srcdoc - allow-same-origin needed for postMessage to work
-    return f'<iframe srcdoc="{escaped_html}" style="width: 100%; height: calc(100vh - 280px); min-height: 400px; border: none; border-radius: 8px;" sandbox="allow-scripts allow-same-origin" id="graph-iframe"></iframe>'
+    return f'<iframe srcdoc="{escaped_html}" style="width: 100vw; height: 100vh; border: none;" sandbox="allow-scripts allow-same-origin" id="graph-iframe"></iframe>'
 
 def get_agent_response_streaming(question, history, source="user"):
     """Get answer from backend with streaming progress updates
@@ -918,65 +1111,340 @@ def refresh_graph():
 
 # --- Custom CSS ---
 custom_css = """
-/* Responsive layout */
+/* === FULLSCREEN IMMERSIVE LAYOUT === */
+
+/* Kill Gradio defaults - no scrollbars, no padding, no borders */
+html, body {
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    background: #0d1117 !important;
+    height: 100vh !important;
+}
 .gradio-container {
     max-width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: transparent !important;
+    overflow: hidden !important;
+    height: 100vh !important;
 }
-/* Graph container styling */
-#graph-container {
-    border: 1px solid var(--border-color-primary);
-    border-radius: var(--radius-md);
-    overflow: hidden;
-    height: calc(100vh - 250px);
-    min-height: 400px;
-    background: var(--background-fill-primary);
+.main, .wrap, .contain {
+    padding: 0 !important;
+    gap: 0 !important;
+    overflow: hidden !important;
 }
-#graph-container iframe {
-    background: transparent;
+footer {
+    display: none !important;
 }
-/* Responsive chatbot */
-#chatbot {
-    height: calc(100vh - 420px) !important;
+
+/* === FULLSCREEN GRAPH BACKGROUND === */
+#graph-bg {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    z-index: 0 !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: hidden !important;
+}
+#graph-bg iframe {
+    width: 100vw !important;
+    height: 100vh !important;
+    border: none !important;
+}
+#graph-bg > div {
+    padding: 0 !important;
+    margin: 0 !important;
+}
+
+/* === TRANSPARENT OVERLAY CONTAINER === */
+#overlay-container {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    z-index: 10 !important;
+    pointer-events: none !important;
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+}
+
+/* === HEADER BAR === */
+#header-bar {
+    pointer-events: auto !important;
+    flex-shrink: 0 !important;
+    padding: 0 !important;
+}
+#header-bar > div {
+    padding: 0 !important;
+}
+.header-inner {
+    background: rgba(13, 17, 23, 0.8);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid rgba(0, 212, 255, 0.2);
+    padding: 10px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.header-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: #e6edf3;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.header-accent {
+    color: #00d4ff;
+}
+.header-subtitle {
+    font-size: 11px;
+    color: #8b949e;
+    font-weight: 400;
+}
+
+/* === GLASSMORPHIC CHAT PANEL (draggable + resizable) === */
+#chat-panel {
+    pointer-events: auto !important;
+    position: absolute !important;
+    top: 52px !important;
+    left: 16px !important;
+    width: 420px !important;
+    height: calc(100vh - 94px) !important;
+    background: rgba(13, 17, 23, 0.25) !important;
+    backdrop-filter: blur(12px) !important;
+    -webkit-backdrop-filter: blur(12px) !important;
+    border: 1px solid rgba(0, 212, 255, 0.15) !important;
+    border-radius: 12px !important;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(0, 212, 255, 0.05) !important;
+    padding: 0 14px 12px 14px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 8px !important;
+    overflow: hidden !important;
+    min-width: 300px !important;
     min-height: 250px !important;
+    max-width: 90vw !important;
+    max-height: calc(100vh - 60px) !important;
+}
+/* Drag handle at top of chat panel */
+.chat-drag-handle {
+    cursor: grab;
+    padding: 8px 0 4px 0;
+    text-align: center;
+    flex-shrink: 0;
+    user-select: none;
+    -webkit-user-select: none;
+}
+.chat-drag-handle:active { cursor: grabbing; }
+.chat-drag-handle .drag-dots {
+    display: inline-block;
+    width: 40px;
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(0, 212, 255, 0.3);
+    transition: background 0.2s;
+}
+.chat-drag-handle:hover .drag-dots {
+    background: rgba(0, 212, 255, 0.6);
+}
+
+/* Resize grip (bottom-right corner, injected via JS) */
+.resize-grip {
+    position: absolute !important;
+    bottom: 2px !important;
+    right: 2px !important;
+    width: 22px !important;
+    height: 22px !important;
+    cursor: nwse-resize !important;
+    z-index: 100 !important;
+    pointer-events: auto !important;
+    background: transparent !important;
+    border-radius: 0 0 10px 0 !important;
+}
+.resize-grip::after {
+    content: '';
+    position: absolute;
+    bottom: 4px;
+    right: 4px;
+    width: 10px;
+    height: 10px;
+    border-right: 2px solid rgba(0, 212, 255, 0.3);
+    border-bottom: 2px solid rgba(0, 212, 255, 0.3);
+    pointer-events: none;
+}
+.resize-grip:hover::after {
+    border-color: rgba(0, 212, 255, 0.7);
+}
+
+/* === CHATBOT === */
+#chatbot,
+#chatbot *:not([data-testid="bot"]):not([data-testid="user"]):not(.message):not(.bot):not(.user) {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+}
+#chatbot {
+    flex: 1 !important;
+    min-height: 0 !important;
     max-height: none !important;
+    overflow-y: auto !important;
 }
-/* Stack columns on smaller screens */
-@media (max-width: 900px) {
-    #graph-container {
-        height: 50vh;
-        min-height: 300px;
-    }
-    #chatbot {
-        height: 40vh !important;
-        min-height: 200px !important;
-    }
+/* Bot bubbles - 3D cyan glow */
+#chatbot [data-testid="bot"],
+#chatbot .bot,
+#chatbot .message.bot {
+    background: rgba(0, 212, 255, 0.40) !important;
+    border: 1px solid rgba(0, 212, 255, 0.50) !important;
+    border-radius: 14px 14px 14px 4px !important;
+    box-shadow: 0 2px 8px rgba(0, 212, 255, 0.15), inset 0 1px 0 rgba(255,255,255,0.05) !important;
+    color: #e6edf3 !important;
+    font-size: 13px !important;
+    line-height: 1.5 !important;
+    padding: 10px 14px !important;
 }
-/* Suggestion buttons */
+/* User bubbles - 3D subtle white glow */
+#chatbot [data-testid="user"],
+#chatbot .user,
+#chatbot .message.user {
+    background: rgba(255, 255, 255, 0.35) !important;
+    border: 1px solid rgba(255, 255, 255, 0.40) !important;
+    border-radius: 14px 14px 4px 14px !important;
+    box-shadow: 0 2px 8px rgba(255, 255, 255, 0.08), inset 0 1px 0 rgba(255,255,255,0.05) !important;
+    color: #e6edf3 !important;
+    font-size: 13px !important;
+    line-height: 1.5 !important;
+    padding: 10px 14px !important;
+}
+
+/* === INPUT FIELD === */
+#chat-panel .input-row {
+    flex-shrink: 0 !important;
+}
+#chat-panel textarea,
+#chat-panel input[type="text"] {
+    background: rgba(22, 27, 34, 0.3) !important;
+    border: 1px solid rgba(0, 212, 255, 0.2) !important;
+    border-radius: 8px !important;
+    color: #e6edf3 !important;
+    font-size: 13px !important;
+    padding: 10px 12px !important;
+}
+#chat-panel textarea:focus,
+#chat-panel input[type="text"]:focus {
+    border-color: #00d4ff !important;
+    box-shadow: 0 0 0 2px rgba(0, 212, 255, 0.15) !important;
+    outline: none !important;
+}
+/* Send button */
+#send-btn {
+    background: linear-gradient(135deg, #00d4ff 0%, #0088cc 100%) !important;
+    color: #fff !important;
+    border: none !important;
+    border-radius: 8px !important;
+    font-weight: 600 !important;
+    font-size: 13px !important;
+    cursor: pointer !important;
+    transition: all 0.2s ease !important;
+    min-width: 70px !important;
+}
+#send-btn:hover {
+    box-shadow: 0 4px 16px rgba(0, 212, 255, 0.35) !important;
+    transform: translateY(-1px) !important;
+}
+
+/* === SUGGESTION BUTTONS === */
 .suggestion-btn {
-    margin: 2px;
-    font-size: 12px;
+    background: rgba(0, 212, 255, 0.06) !important;
+    border: 1px solid rgba(0, 212, 255, 0.15) !important;
+    color: #b0d4e8 !important;
+    border-radius: 6px !important;
+    font-size: 11px !important;
+    padding: 6px 10px !important;
+    cursor: pointer !important;
+    transition: all 0.2s ease !important;
+    text-align: left !important;
 }
-/* Selected node indicator */
+.suggestion-btn:hover {
+    background: rgba(0, 212, 255, 0.12) !important;
+    border-color: rgba(0, 212, 255, 0.35) !important;
+    color: #e6edf3 !important;
+    box-shadow: 0 2px 8px rgba(0, 212, 255, 0.15) !important;
+}
+
+/* === SELECTED NODE DISPLAY === */
 #selected-node-display {
     font-size: 12px;
-    padding: 8px;
-    background: var(--background-fill-secondary);
-    border-radius: 4px;
-    margin-bottom: 8px;
-    color: var(--body-text-color);
+    padding: 6px 10px;
+    background: rgba(0, 212, 255, 0.08);
+    border-radius: 6px;
+    border: 1px solid rgba(0, 212, 255, 0.15);
+    color: #b0d4e8;
+    flex-shrink: 0;
 }
-/* Hide the node click data input */
+
+/* === REFRESH GRAPH BUTTON === */
+#refresh-btn {
+    background: rgba(0, 212, 255, 0.1) !important;
+    border: 1px solid rgba(0, 212, 255, 0.2) !important;
+    color: #00d4ff !important;
+    border-radius: 6px !important;
+    font-size: 11px !important;
+    cursor: pointer !important;
+    flex-shrink: 0 !important;
+}
+#refresh-btn:hover {
+    background: rgba(0, 212, 255, 0.2) !important;
+}
+
+/* === FOOTER BAR === */
+#footer-bar {
+    pointer-events: none !important;
+    flex-shrink: 0 !important;
+    padding: 0 !important;
+    margin-top: auto !important;
+}
+#footer-bar > div {
+    padding: 0 !important;
+}
+.footer-inner {
+    background: rgba(13, 17, 23, 0.7);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border-top: 1px solid rgba(0, 212, 255, 0.1);
+    padding: 6px 24px;
+    text-align: center;
+    font-size: 10px;
+    color: #484f58;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* === HIDDEN NODE CLICK DATA === */
 #node-click-data {
+    position: absolute !important;
+    width: 0 !important;
     height: 0 !important;
-    min-height: 0 !important;
-    max-height: 0 !important;
     overflow: hidden !important;
     opacity: 0 !important;
+    pointer-events: none !important;
     margin: 0 !important;
     padding: 0 !important;
     border: none !important;
 }
-/* Hide processing/progress indicators globally */
+
+/* === HIDE GRADIO PROGRESS INDICATORS === */
 .progress-text,
 .eta-bar,
 .progress-bar,
@@ -988,6 +1456,175 @@ custom_css = """
 .chatbot .progress-text {
     display: none !important;
     visibility: hidden !important;
+}
+
+/* === REMOVE GRADIO BORDERS/BACKGROUNDS === */
+.block, .form, .gap {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+}
+
+/* Labels in chat panel */
+#chat-panel label, #chat-panel .label-wrap {
+    color: #8b949e !important;
+    font-size: 11px !important;
+}
+
+/* Suggestions label */
+#suggestions-label {
+    color: #8b949e !important;
+    font-size: 11px !important;
+    flex-shrink: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+#suggestions-label p {
+    margin: 0 !important;
+    color: #8b949e !important;
+    font-size: 11px !important;
+}
+
+/* === RESPONSIVE === */
+@media (max-width: 768px) {
+    #chat-panel {
+        width: calc(100vw - 32px) !important;
+        left: 16px !important;
+    }
+}
+
+/* === THEME TOGGLE BUTTON === */
+#theme-toggle {
+    background: rgba(0, 212, 255, 0.1);
+    border: 1px solid rgba(0, 212, 255, 0.2);
+    color: #e6edf3;
+    border-radius: 8px;
+    padding: 6px 10px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    font-size: 14px;
+    transition: all 0.2s ease;
+}
+#theme-toggle:hover {
+    background: rgba(0, 212, 255, 0.2);
+    border-color: rgba(0, 212, 255, 0.4);
+}
+
+/* === LIGHT MODE OVERRIDES === */
+.light-mode,
+.light-mode body {
+    background: #d5dce8 !important;
+}
+.light-mode .gradio-container {
+    background: transparent !important;
+}
+.light-mode .header-inner {
+    background: rgba(255, 255, 255, 0.92);
+    border-bottom: 1px solid rgba(0, 60, 130, 0.12);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+.light-mode .header-title {
+    color: #1f2328;
+}
+.light-mode .header-accent {
+    color: #0969da;
+}
+.light-mode .header-subtitle {
+    color: #656d76;
+}
+.light-mode #theme-toggle {
+    background: rgba(9, 105, 218, 0.08);
+    border: 1px solid rgba(9, 105, 218, 0.15);
+    color: #1f2328;
+}
+.light-mode #theme-toggle:hover {
+    background: rgba(9, 105, 218, 0.15);
+    border-color: rgba(9, 105, 218, 0.3);
+}
+.light-mode #chat-panel {
+    background: rgba(255, 255, 255, 0.97) !important;
+    border: 1px solid rgba(0, 60, 130, 0.18) !important;
+    box-shadow: 0 4px 24px rgba(0, 40, 100, 0.12), 0 1px 3px rgba(0, 0, 0, 0.08) !important;
+    backdrop-filter: blur(20px) !important;
+    -webkit-backdrop-filter: blur(20px) !important;
+}
+.light-mode .chat-drag-handle .drag-dots {
+    background: rgba(26, 58, 110, 0.4);
+}
+.light-mode .chat-drag-handle:hover .drag-dots {
+    background: rgba(26, 58, 110, 0.7);
+}
+.light-mode #chatbot [data-testid="bot"],
+.light-mode #chatbot .bot,
+.light-mode #chatbot .message.bot {
+    background: #e8f1fc !important;
+    border: 1px solid #c4d9f2 !important;
+    box-shadow: 0 1px 3px rgba(0, 80, 170, 0.08) !important;
+    color: #1a1a2e !important;
+}
+.light-mode #chatbot [data-testid="user"],
+.light-mode #chatbot .user,
+.light-mode #chatbot .message.user {
+    background: #f0f2f5 !important;
+    border: 1px solid #d8dce2 !important;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04) !important;
+    color: #1a1a2e !important;
+}
+.light-mode #chat-panel textarea,
+.light-mode #chat-panel input[type="text"] {
+    background: #ffffff !important;
+    border: 1px solid rgba(0, 105, 218, 0.3) !important;
+    color: #1a1a2e !important;
+}
+.light-mode #chat-panel textarea:focus,
+.light-mode #chat-panel input[type="text"]:focus {
+    border-color: #0969da !important;
+    box-shadow: 0 0 0 2px rgba(9, 105, 218, 0.15) !important;
+}
+.light-mode #send-btn {
+    background: linear-gradient(135deg, #0969da 0%, #0550ae 100%) !important;
+}
+.light-mode #send-btn:hover {
+    box-shadow: 0 4px 16px rgba(9, 105, 218, 0.3) !important;
+}
+.light-mode .suggestion-btn {
+    background: #ffffff !important;
+    border: 1px solid rgba(9, 105, 218, 0.25) !important;
+    color: #0550ae !important;
+}
+.light-mode .suggestion-btn:hover {
+    background: rgba(9, 105, 218, 0.08) !important;
+    border-color: rgba(9, 105, 218, 0.45) !important;
+    color: #0550ae !important;
+    box-shadow: 0 2px 8px rgba(9, 105, 218, 0.15) !important;
+}
+.light-mode #selected-node-display {
+    background: rgba(9, 105, 218, 0.06);
+    border: 1px solid rgba(9, 105, 218, 0.18);
+    color: #0550ae;
+}
+.light-mode #refresh-btn {
+    background: rgba(9, 105, 218, 0.08) !important;
+    border: 1px solid rgba(9, 105, 218, 0.15) !important;
+    color: #0969da !important;
+}
+.light-mode #refresh-btn:hover {
+    background: rgba(9, 105, 218, 0.15) !important;
+}
+.light-mode .footer-inner {
+    background: rgba(255, 255, 255, 0.9);
+    border-top: 1px solid rgba(0, 60, 130, 0.1);
+    box-shadow: 0 -1px 3px rgba(0, 0, 0, 0.04);
+    color: #4a5568;
+}
+.light-mode #chat-panel label,
+.light-mode #chat-panel .label-wrap {
+    color: #424a53 !important;
+}
+.light-mode #suggestions-label,
+.light-mode #suggestions-label p {
+    color: #424a53 !important;
 }
 """
 
@@ -1045,9 +1682,282 @@ window.addEventListener('message', function(event) {
 </script>
 """
 
+# JavaScript for draggable + resizable panel
+# Grips are appended to document.body (outside Gradio DOM) to avoid all interference
+drag_resize_js = """
+function() {
+    var MIN_W = 300, MIN_H = 250;
+    var mode = null;
+    var startX, startY, startL, startT, startW, startH;
+    var overlay = null;
+
+    function attach() {
+        var panel = document.querySelector('#chat-panel');
+        if (!panel) { setTimeout(attach, 500); return; }
+        var handle = panel.querySelector('.chat-drag-handle');
+
+        function S(prop, val) { panel.style.setProperty(prop, val, 'important'); }
+
+        /* Transparent fullscreen overlay — blocks iframe from stealing events */
+        function showOverlay(cursor) {
+            overlay = document.createElement('div');
+            overlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:99999;cursor:'+cursor+';';
+            document.body.appendChild(overlay);
+            overlay.addEventListener('mousemove', onMove);
+            overlay.addEventListener('mouseup', onUp);
+        }
+        function hideOverlay() {
+            if (overlay) { overlay.remove(); overlay = null; }
+        }
+
+        function onMove(e) {
+            var dx = e.clientX - startX, dy = e.clientY - startY;
+            if (mode === 'drag') {
+                S('left', Math.max(0, Math.min(startL + dx, window.innerWidth - 80)) + 'px');
+                S('top', Math.max(0, Math.min(startT + dy, window.innerHeight - 80)) + 'px');
+                S('bottom', 'auto');
+            } else if (mode === 'resize') {
+                S('width', Math.max(MIN_W, startW + dx) + 'px');
+                S('height', Math.max(MIN_H, startH + dy) + 'px');
+            }
+        }
+        function onUp() {
+            mode = null;
+            hideOverlay();
+            document.body.style.removeProperty('user-select');
+        }
+
+        /* Create visible resize grip in bottom-right corner */
+        var grip = document.createElement('div');
+        grip.style.cssText = 'position:absolute;bottom:0;right:0;width:28px;height:28px;cursor:nwse-resize;z-index:100;pointer-events:auto;';
+        grip.innerHTML = '<svg width="14" height="14" style="position:absolute;bottom:5px;right:5px;pointer-events:none;"><line x1="12" y1="4" x2="4" y2="12" stroke="rgba(0,212,255,0.4)" stroke-width="1.5"/><line x1="12" y1="8" x2="8" y2="12" stroke="rgba(0,212,255,0.4)" stroke-width="1.5"/></svg>';
+        function gripColor(hover) {
+            var lt = document.documentElement.classList.contains('light-mode');
+            var c = hover ? (lt ? 'rgba(26,58,110,0.8)' : 'rgba(0,212,255,0.8)') : (lt ? 'rgba(26,58,110,0.4)' : 'rgba(0,212,255,0.4)');
+            grip.querySelectorAll('line').forEach(function(l){ l.setAttribute('stroke', c); });
+        }
+        grip.addEventListener('mouseenter', function() { gripColor(true); });
+        grip.addEventListener('mouseleave', function() { if (!mode) gripColor(false); });
+        panel.appendChild(grip);
+
+        /* --- DRAG (via handle bar) --- */
+        if (handle) {
+            handle.addEventListener('mousedown', function(e) {
+                mode = 'drag';
+                startX = e.clientX; startY = e.clientY;
+                var r = panel.getBoundingClientRect();
+                startL = r.left; startT = r.top;
+                S('transition', 'none');
+                document.body.style.setProperty('user-select', 'none', 'important');
+                showOverlay('grabbing');
+                e.preventDefault(); e.stopPropagation();
+            });
+        }
+
+        /* --- RESIZE (via corner grip) --- */
+        grip.addEventListener('mousedown', function(e) {
+            mode = 'resize';
+            startX = e.clientX; startY = e.clientY;
+            var r = panel.getBoundingClientRect();
+            startW = r.width; startH = r.height;
+            S('transition', 'none');
+            document.body.style.setProperty('user-select', 'none', 'important');
+            showOverlay('nwse-resize');
+            e.preventDefault(); e.stopPropagation();
+        });
+
+        console.log('[GBAIA] Drag + corner resize ready');
+
+        /* === Theme Toggle === */
+        var themeBtn = document.getElementById('theme-toggle');
+        if (themeBtn && !themeBtn._themeAttached) {
+            themeBtn._themeAttached = true;
+
+            function applyLightMode(isLight) {
+                var S = function(el, styles) {
+                    if (!el) return;
+                    for (var k in styles) el.style.setProperty(k, styles[k], 'important');
+                };
+                var R = function(el, props) {
+                    if (!el) return;
+                    props.forEach(function(p) { el.style.removeProperty(p); });
+                };
+
+                document.documentElement.classList.toggle('light-mode', isLight);
+
+                /* Icons */
+                var sun = document.getElementById('theme-icon-sun');
+                var moon = document.getElementById('theme-icon-moon');
+                if (sun) sun.style.display = isLight ? 'none' : 'block';
+                if (moon) moon.style.display = isLight ? 'block' : 'none';
+
+                /* Chat panel - blue frosted glass */
+                if (isLight) {
+                    S(panel, {
+                        'background': 'rgba(60, 100, 170, 0.28)',
+                        'border': '1px solid rgba(80, 130, 200, 0.35)',
+                        'box-shadow': '0 8px 32px rgba(0, 40, 100, 0.15), inset 0 1px 0 rgba(255,255,255,0.15)',
+                        'backdrop-filter': 'blur(16px)',
+                        '-webkit-backdrop-filter': 'blur(16px)'
+                    });
+                } else {
+                    S(panel, {
+                        'background': 'rgba(13, 17, 23, 0.25)',
+                        'border': '1px solid rgba(0, 212, 255, 0.15)',
+                        'box-shadow': '0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(0, 212, 255, 0.05)',
+                        'backdrop-filter': 'blur(12px)',
+                        '-webkit-backdrop-filter': 'blur(12px)'
+                    });
+                }
+
+                /* Bot bubbles + all inner text */
+                var darkBlue = '#1a3a6e';
+                document.querySelectorAll('#chatbot [data-testid="bot"], #chatbot .bot').forEach(function(el) {
+                    if (isLight) {
+                        S(el, { 'background': 'rgba(9, 105, 218, 0.15)', 'border': '1px solid rgba(26, 58, 110, 0.30)',
+                                'border-left': '3px solid ' + darkBlue, 'color': '#1a1a2e',
+                                'box-shadow': '0 2px 8px rgba(9, 105, 218, 0.10), inset 0 1px 0 rgba(255,255,255,0.4)' });
+                    } else {
+                        S(el, { 'background': 'rgba(0, 212, 255, 0.40)', 'border': '1px solid rgba(0, 212, 255, 0.50)',
+                                'border-left': '3px solid #00d4ff', 'color': '#e6edf3',
+                                'box-shadow': '0 2px 8px rgba(0, 212, 255, 0.15), inset 0 1px 0 rgba(255,255,255,0.05)' });
+                    }
+                    el.querySelectorAll('*').forEach(function(child) {
+                        child.style.setProperty('color', isLight ? '#1a1a2e' : '#e6edf3', 'important');
+                    });
+                });
+
+                /* User bubbles + all inner text - lighter, more transparent */
+                document.querySelectorAll('#chatbot [data-testid="user"], #chatbot .user').forEach(function(el) {
+                    if (isLight) {
+                        S(el, { 'background': 'rgba(255, 255, 255, 0.45)', 'border': '1px solid rgba(26, 58, 110, 0.18)',
+                                'border-right': '3px solid rgba(26, 58, 110, 0.4)', 'border-left': 'none', 'color': '#1a1a2e',
+                                'box-shadow': '0 2px 8px rgba(0, 0, 0, 0.05), inset 0 1px 0 rgba(255,255,255,0.5)' });
+                    } else {
+                        S(el, { 'background': 'rgba(255, 255, 255, 0.35)', 'border': '1px solid rgba(255, 255, 255, 0.40)',
+                                'border-right': 'none', 'border-left': 'none', 'color': '#e6edf3',
+                                'box-shadow': '0 2px 8px rgba(255, 255, 255, 0.08)' });
+                    }
+                    el.querySelectorAll('*').forEach(function(child) {
+                        child.style.setProperty('color', isLight ? '#1a1a2e' : '#e6edf3', 'important');
+                    });
+                });
+
+                /* Selected node display */
+                var selNode = document.getElementById('selected-node-display');
+                if (selNode) {
+                    if (isLight) {
+                        S(selNode, { 'color': darkBlue, 'border-color': 'rgba(26, 58, 110, 0.25)', 'background': 'rgba(26, 58, 110, 0.08)' });
+                        selNode.querySelectorAll('*').forEach(function(c) { c.style.setProperty('color', darkBlue, 'important'); });
+                    } else {
+                        S(selNode, { 'color': '#b0d4e8', 'border-color': 'rgba(0, 212, 255, 0.15)', 'background': 'rgba(0, 212, 255, 0.08)' });
+                        selNode.querySelectorAll('*').forEach(function(c) { c.style.setProperty('color', '#b0d4e8', 'important'); });
+                    }
+                }
+
+                /* Refresh graph button */
+                var refreshBtn = document.getElementById('refresh-btn');
+                if (refreshBtn) {
+                    if (isLight) {
+                        S(refreshBtn, { 'background': 'rgba(26, 58, 110, 0.10)', 'border': '1px solid rgba(26, 58, 110, 0.25)', 'color': darkBlue });
+                    } else {
+                        S(refreshBtn, { 'background': 'rgba(0, 212, 255, 0.1)', 'border': '1px solid rgba(0, 212, 255, 0.2)', 'color': '#00d4ff' });
+                    }
+                }
+
+                /* Resize grip color */
+                if (typeof gripColor === 'function') gripColor(false);
+
+                /* Suggestions label */
+                var sugLabel = document.getElementById('suggestions-label');
+                if (sugLabel) {
+                    sugLabel.querySelectorAll('*').forEach(function(c) { c.style.setProperty('color', isLight ? darkBlue : '#8b949e', 'important'); });
+                }
+
+                /* Input field */
+                panel.querySelectorAll('textarea, input[type="text"]').forEach(function(el) {
+                    if (isLight) {
+                        S(el, { 'background': 'rgba(255, 255, 255, 0.6)', 'border': '1px solid rgba(9, 105, 218, 0.2)', 'color': '#1a1a2e' });
+                    } else {
+                        S(el, { 'background': 'rgba(22, 27, 34, 0.3)', 'border': '1px solid rgba(0, 212, 255, 0.2)', 'color': '#e6edf3' });
+                    }
+                });
+
+                /* Suggestion buttons */
+                document.querySelectorAll('.suggestion-btn').forEach(function(el) {
+                    if (isLight) {
+                        S(el, { 'background': 'rgba(26, 58, 110, 0.06)', 'border': '1px solid rgba(26, 58, 110, 0.22)', 'color': darkBlue });
+                    } else {
+                        S(el, { 'background': 'rgba(0, 212, 255, 0.06)', 'border': '1px solid rgba(0, 212, 255, 0.15)', 'color': '#b0d4e8' });
+                    }
+                });
+
+                /* Send button */
+                var sendBtn = document.getElementById('send-btn');
+                if (sendBtn) {
+                    if (isLight) {
+                        S(sendBtn, { 'background': 'linear-gradient(135deg, #0969da 0%, #0550ae 100%)' });
+                    } else {
+                        S(sendBtn, { 'background': 'linear-gradient(135deg, #00d4ff 0%, #0088cc 100%)' });
+                    }
+                }
+
+                /* Notify graph iframe */
+                var iframe = document.querySelector('#graph-bg iframe');
+                if (iframe && iframe.contentWindow) {
+                    iframe.contentWindow.postMessage({ type: 'themeChange', theme: isLight ? 'light' : 'dark' }, '*');
+                }
+
+                console.log('[GBAIA] Theme applied:', isLight ? 'light' : 'dark');
+            }
+
+            /* Watch for new chat messages and apply light mode styles */
+            var chatEl = document.getElementById('chatbot');
+            if (chatEl) {
+                var observer = new MutationObserver(function() {
+                    if (document.documentElement.classList.contains('light-mode')) {
+                        var db = '#1a3a6e';
+                        chatEl.querySelectorAll('[data-testid="bot"], .bot').forEach(function(el) {
+                            el.style.setProperty('border-left', '3px solid ' + db, 'important');
+                            el.style.setProperty('background', 'rgba(9, 105, 218, 0.15)', 'important');
+                            el.style.setProperty('border-color', 'rgba(26, 58, 110, 0.30)', 'important');
+                        });
+                        chatEl.querySelectorAll('[data-testid="user"], .user').forEach(function(el) {
+                            el.style.setProperty('border-left', 'none', 'important');
+                            el.style.setProperty('border-right', '3px solid rgba(26, 58, 110, 0.4)', 'important');
+                            el.style.setProperty('background', 'rgba(255, 255, 255, 0.45)', 'important');
+                            el.style.setProperty('border-color', 'rgba(26, 58, 110, 0.18)', 'important');
+                        });
+                        chatEl.querySelectorAll('[data-testid="bot"] *, .bot *, [data-testid="user"] *, .user *').forEach(function(child) {
+                            child.style.setProperty('color', '#1a1a2e', 'important');
+                        });
+                    }
+                });
+                observer.observe(chatEl, { childList: true, subtree: true });
+            }
+
+            themeBtn.addEventListener('click', function() {
+                var isLight = !document.documentElement.classList.contains('light-mode');
+                localStorage.setItem('gbaia-theme', isLight ? 'light' : 'dark');
+                applyLightMode(isLight);
+            });
+
+            /* Apply saved theme */
+            var saved = localStorage.getItem('gbaia-theme');
+            if (saved === 'light') {
+                applyLightMode(true);
+                /* Retry iframe notification after it loads */
+                setTimeout(function() { applyLightMode(true); }, 2000);
+            }
+            console.log('[GBAIA] Theme toggle attached, saved:', saved);
+        }
+    }
+    attach();
+}
+"""
+
 # --- Gradio Interface ---
-with gr.Blocks(theme=gr.themes.Soft(), title="Network AI Agent", css=custom_css, head=js_code) as demo:
-    gr.Markdown("# Network AI Agent Demo")
+with gr.Blocks(theme=gr.themes.Base(), title="Network AI Agent", css=custom_css, head=js_code, js=drag_resize_js) as demo:
 
     # State for dynamic suggestions
     suggestions_state = gr.State(initial_suggestions)
@@ -1055,21 +1965,35 @@ with gr.Blocks(theme=gr.themes.Soft(), title="Network AI Agent", css=custom_css,
     # Hidden component to receive node click data from iframe (hidden via CSS, not visible=False)
     node_click_data = gr.Textbox(elem_id="node-click-data", label="", container=False)
 
-    with gr.Row():
-        # Left Column - Graph Visualization (50%)
-        with gr.Column(scale=1):
-            gr.Markdown("### Network Topology Graph")
+    # Layer 1: Fullscreen 3D graph background
+    graph_html = gr.HTML(
+        value=generate_graph_html,
+        elem_id="graph-bg"
+    )
 
-            graph_html = gr.HTML(
-                value=generate_graph_html,
-                elem_id="graph-container"
-            )
+    # Layer 2: Transparent overlay with UI elements
+    with gr.Column(elem_id="overlay-container"):
 
-            refresh_btn = gr.Button("Refresh Graph", variant="secondary", size="sm")
+        # Header bar
+        gr.HTML(
+            value="""<div class="header-inner">
+                <div class="header-title">
+                    <span class="header-accent">Network AI Agent</span>
+                    <span class="header-subtitle">Graph-Based AI Agent for modern networks</span>
+                </div>
+                <button id="theme-toggle" title="Toggle light/dark mode">
+                    <svg id="theme-icon-sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+                    <svg id="theme-icon-moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                </button>
+            </div>""",
+            elem_id="header-bar"
+        )
 
-        # Right Column - Chat Interface (50%)
-        with gr.Column(scale=1):
-            gr.Markdown("### Chat with AI Agent")
+        # Glassmorphic chat panel (left sidebar, draggable + resizable)
+        with gr.Column(elem_id="chat-panel"):
+
+            # Drag handle
+            gr.HTML(value='<div class="chat-drag-handle" id="chat-drag-handle"><span class="drag-dots"></span></div>')
 
             # Selected node display
             selected_node_display = gr.Markdown(
@@ -1077,18 +2001,25 @@ with gr.Blocks(theme=gr.themes.Soft(), title="Network AI Agent", css=custom_css,
                 elem_id="selected-node-display"
             )
 
-            chatbot = gr.Chatbot(label="Conversation History", height=None, type="messages", elem_id="chatbot")
+            chatbot = gr.Chatbot(
+                label="Conversation",
+                height=None,
+                type="messages",
+                elem_id="chatbot",
+                value=[{"role": "assistant", "content": "Welcome! I'm your Network AI Agent. Ask me about tenants, fabrics, anomalies, faults, or click a node in the graph to explore it."}]
+            )
 
-            with gr.Row():
+            with gr.Row(elem_classes=["input-row"]):
                 msg_input = gr.Textbox(
-                    label="Your Question",
-                    placeholder="Ask a question about the network...",
+                    label="",
+                    placeholder="Ask about the network...",
                     scale=4,
+                    container=False,
                 )
-                submit_button = gr.Button("Send", variant="primary", scale=1)
+                submit_button = gr.Button("Send", variant="primary", scale=1, elem_id="send-btn")
 
-            # Dynamic Suggestions section using buttons
-            gr.Markdown("**Suggestions** *(click to ask)*")
+            # Suggestions
+            gr.Markdown("**Suggestions** *(click to ask)*", elem_id="suggestions-label")
             with gr.Row():
                 suggestion_btns = []
                 for i in range(4):
@@ -1100,6 +2031,16 @@ with gr.Blocks(theme=gr.themes.Soft(), title="Network AI Agent", css=custom_css,
                         elem_classes=["suggestion-btn"]
                     )
                     suggestion_btns.append(btn)
+
+            refresh_btn = gr.Button("Refresh Graph", variant="secondary", size="sm", elem_id="refresh-btn")
+
+        # Footer bar
+        gr.HTML(
+            value="""<div class="footer-inner">
+                Data sources: Cisco APIC &middot; Nexus Dashboard &middot; Neo4j Knowledge Graph
+            </div>""",
+            elem_id="footer-bar"
+        )
 
     # Function to update suggestion buttons
     def update_buttons(suggestions):
@@ -1251,4 +2192,4 @@ with gr.Blocks(theme=gr.themes.Soft(), title="Network AI Agent", css=custom_css,
         outputs=[graph_html]
     )
 
-demo.launch(server_name="0.0.0.0", server_port=7860, pwa=True)
+demo.launch(server_name="0.0.0.0", server_port=7860, pwa=False)

@@ -570,13 +570,24 @@ def process_nexus_dashboard_data(driver, token, url):
             # Determine which fabric to use for linking APIC objects
             target_fabric = APIC_FABRIC_NAME
             if not target_fabric and fabrics_data:
-                # Auto-detect: use the first fabric if not specified
-                target_fabric = fabrics_data[0].get("fabricName", "")
+                # Auto-detect: find the ACI fabric (APIC only manages ACI fabrics)
+                for f in fabrics_data:
+                    if f.get("type") == "aci":
+                        target_fabric = f.get("fabricName", "")
+                        break
+                # Fallback to first fabric if no ACI type found
+                if not target_fabric:
+                    target_fabric = fabrics_data[0].get("fabricName", "")
 
             if target_fabric:
                 print(f"\n▶️  Linking APIC objects to Fabric: {target_fabric}")
 
-                # Link all Tenants to the Fabric
+                # Remove stale Tenant-Fabric links to other fabrics, then link to target
+                db_session.run("""
+                    MATCH (t:Tenant)-[r:BELONGS_TO]->(f:Fabric)
+                    WHERE f.name <> $fabric_name
+                    DELETE r
+                """, fabric_name=target_fabric)
                 result = db_session.run("""
                     MATCH (f:Fabric {name: $fabric_name})
                     MATCH (t:Tenant)
@@ -587,7 +598,12 @@ def process_nexus_dashboard_data(driver, token, url):
                 tenant_count = result.single()["linked_count"]
                 print(f"  - Linked {tenant_count} Tenants to Fabric '{target_fabric}'")
 
-                # Link all Nodes to the Fabric
+                # Remove stale Node-Fabric links to other fabrics, then link to target
+                db_session.run("""
+                    MATCH (n:Node)-[r:BELONGS_TO]->(f:Fabric)
+                    WHERE f.name <> $fabric_name
+                    DELETE r
+                """, fabric_name=target_fabric)
                 result = db_session.run("""
                     MATCH (f:Fabric {name: $fabric_name})
                     MATCH (n:Node)

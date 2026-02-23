@@ -381,12 +381,12 @@ if LOCAL_LLM_URL:
         temperature=0.3
     )
 else:
-    # GPT-5 models don't support the temperature parameter (only default value of 1 is allowed)
-    # See: https://community.openai.com/t/temperature-in-gpt-5-models/1337133
     print("✅ Using OpenAI models (LOCAL_LLM_URL not set).")
-    cypher_llm = ChatOpenAI(model="gpt-5-mini")
-    qa_llm = ChatOpenAI(model="gpt-5-mini")
-    suggestion_llm = ChatOpenAI(model="gpt-5-mini")
+    openai_client = httpx.Client(verify=False)
+    openai_async_client = httpx.AsyncClient(verify=False)
+    cypher_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, http_client=openai_client, http_async_client=openai_async_client)
+    qa_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, http_client=openai_client, http_async_client=openai_async_client)
+    suggestion_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3, http_client=openai_client, http_async_client=openai_async_client)
 
 
 # --- Define the Prompt Templates ---
@@ -542,7 +542,7 @@ For issues ACTUALLY FOUND in the results above, provide:
 **Warning (monitor/review):**
 - What to investigate for warning issues listed
 
-If no issues were found, state: "No actions required - no issues detected"
+If no issues were found in the sections above, simply write "No actions required" and skip the severity categories.
 
 Query Results:
 {context}
@@ -900,14 +900,17 @@ async def ask_agent_stream(query: Query):
             await asyncio.sleep(0.1)
 
             # Create streaming QA LLM for section progress
-            streaming_qa_llm = ChatOpenAI(
-                http_client=httpx.Client(verify=False) if LOCAL_LLM_URL else None,
-                base_url=LOCAL_LLM_URL if LOCAL_LLM_URL else None,
-                api_key=(LOCAL_LLM_TOKEN if LOCAL_LLM_TOKEN else "EMPTY") if LOCAL_LLM_URL else None,
-                model_name=local_model_name if LOCAL_LLM_URL else "gpt-5-mini",
-                temperature=0,
-                streaming=True
-            )
+            streaming_kwargs = {
+                "http_client": httpx.Client(verify=False),
+                "http_async_client": httpx.AsyncClient(verify=False),
+                "model_name": local_model_name if LOCAL_LLM_URL else "gpt-4o-mini",
+                "temperature": 0,
+                "streaming": True,
+            }
+            if LOCAL_LLM_URL:
+                streaming_kwargs["base_url"] = LOCAL_LLM_URL
+                streaming_kwargs["api_key"] = LOCAL_LLM_TOKEN if LOCAL_LLM_TOKEN else "EMPTY"
+            streaming_qa_llm = ChatOpenAI(**streaming_kwargs)
 
             qa_prompt = PromptTemplate.from_template(qa_template)
             qa_chain = qa_prompt | streaming_qa_llm
@@ -1010,6 +1013,10 @@ def get_suggestions(request: SuggestionRequest):
                 if match:
                     processed_line = processed_line[match.end():]
                 if processed_line:
+                    # Strip enclosing quotes (LLM often wraps suggestions in quotes)
+                    if (processed_line.startswith('"') and processed_line.endswith('"')) or \
+                       (processed_line.startswith("'") and processed_line.endswith("'")):
+                        processed_line = processed_line[1:-1]
                     suggestions.append(processed_line)
         print(f"✅ Generated suggestions: {suggestions}")
         return {"suggestions": suggestions}
