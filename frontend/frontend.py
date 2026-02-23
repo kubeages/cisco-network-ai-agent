@@ -336,8 +336,9 @@ def generate_graph_html():
         }}
         body.light-mode .legend-item {{
             background: rgba(255, 255, 255, 0.9);
-            border: 1px solid rgba(0, 0, 0, 0.1);
+            border: 1px solid rgba(9, 105, 218, 0.12);
             color: #1f2328;
+            box-shadow: 0 2px 8px rgba(9, 105, 218, 0.1);
         }}
         body.light-mode .legend-item:hover {{
             background: rgba(9, 105, 218, 0.12);
@@ -346,10 +347,14 @@ def generate_graph_html():
         body.light-mode .legend-item.inactive {{
             opacity: 0.35;
         }}
+        body.light-mode .legend-shape {{
+            filter: drop-shadow(0 0 3px rgba(9, 105, 218, 0.4));
+        }}
         body.light-mode #click-hint {{
             background: rgba(255, 255, 255, 0.9);
             color: #656d76;
-            border: 1px solid rgba(0, 0, 0, 0.1);
+            border: 1px solid rgba(9, 105, 218, 0.12);
+            box-shadow: 0 2px 8px rgba(9, 105, 218, 0.1);
         }}
         body.light-mode #reset-btn {{
             background: linear-gradient(135deg, #0969da 0%, #0550ae 100%);
@@ -1391,7 +1396,7 @@ footer {
     background: rgba(0, 212, 255, 0.08);
     border-radius: 6px;
     border: 1px solid rgba(0, 212, 255, 0.15);
-    color: #b0d4e8;
+    color: #e6edf3;
     flex-shrink: 0;
 }
 
@@ -1495,9 +1500,9 @@ footer {
 
 /* === THEME TOGGLE BUTTON === */
 #theme-toggle {
-    background: rgba(0, 212, 255, 0.1);
-    border: 1px solid rgba(0, 212, 255, 0.2);
-    color: #e6edf3;
+    background: rgba(13, 17, 23, 0.7);
+    border: 1px solid rgba(0, 212, 255, 0.4);
+    color: #00d4ff;
     border-radius: 8px;
     padding: 6px 10px;
     cursor: pointer;
@@ -1505,10 +1510,13 @@ footer {
     align-items: center;
     font-size: 14px;
     transition: all 0.2s ease;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
 }
 #theme-toggle:hover {
-    background: rgba(0, 212, 255, 0.2);
-    border-color: rgba(0, 212, 255, 0.4);
+    background: rgba(13, 17, 23, 0.85);
+    border-color: rgba(0, 212, 255, 0.6);
+    color: #ffffff;
 }
 
 /* === LIGHT MODE OVERRIDES === */
@@ -1534,13 +1542,16 @@ footer {
     color: #656d76;
 }
 .light-mode #theme-toggle {
-    background: rgba(9, 105, 218, 0.08);
-    border: 1px solid rgba(9, 105, 218, 0.15);
-    color: #1f2328;
+    background: rgba(255, 255, 255, 0.75);
+    border: 1px solid rgba(9, 105, 218, 0.35);
+    color: #0550ae;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
 }
 .light-mode #theme-toggle:hover {
-    background: rgba(9, 105, 218, 0.15);
-    border-color: rgba(9, 105, 218, 0.3);
+    background: rgba(255, 255, 255, 0.9);
+    border-color: rgba(9, 105, 218, 0.5);
+    color: #0339a6;
 }
 .light-mode #chat-panel {
     background: rgba(255, 255, 255, 0.97) !important;
@@ -1620,11 +1631,11 @@ footer {
 }
 .light-mode #chat-panel label,
 .light-mode #chat-panel .label-wrap {
-    color: #424a53 !important;
+    color: #1a3a6e !important;
 }
 .light-mode #suggestions-label,
 .light-mode #suggestions-label p {
-    color: #424a53 !important;
+    color: #1a3a6e !important;
 }
 """
 
@@ -1850,8 +1861,8 @@ function() {
                         S(selNode, { 'color': darkBlue, 'border-color': 'rgba(26, 58, 110, 0.25)', 'background': 'rgba(26, 58, 110, 0.08)' });
                         selNode.querySelectorAll('*').forEach(function(c) { c.style.setProperty('color', darkBlue, 'important'); });
                     } else {
-                        S(selNode, { 'color': '#b0d4e8', 'border-color': 'rgba(0, 212, 255, 0.15)', 'background': 'rgba(0, 212, 255, 0.08)' });
-                        selNode.querySelectorAll('*').forEach(function(c) { c.style.setProperty('color', '#b0d4e8', 'important'); });
+                        S(selNode, { 'color': '#e6edf3', 'border-color': 'rgba(0, 212, 255, 0.15)', 'background': 'rgba(0, 212, 255, 0.08)' });
+                        selNode.querySelectorAll('*').forEach(function(c) { c.style.setProperty('color', '#e6edf3', 'important'); });
                     }
                 }
 
@@ -1872,6 +1883,22 @@ function() {
                 var sugLabel = document.getElementById('suggestions-label');
                 if (sugLabel) {
                     sugLabel.querySelectorAll('*').forEach(function(c) { c.style.setProperty('color', isLight ? darkBlue : '#8b949e', 'important'); });
+                }
+
+                /* Conversation label - match suggestions color in light mode */
+                panel.querySelectorAll('label, .label-wrap').forEach(function(el) {
+                    el.style.setProperty('color', isLight ? darkBlue : '#8b949e', 'important');
+                    el.querySelectorAll('*').forEach(function(c) { c.style.setProperty('color', isLight ? darkBlue : '#8b949e', 'important'); });
+                });
+
+                /* Theme toggle button */
+                var themeBtn = document.getElementById('theme-toggle');
+                if (themeBtn) {
+                    if (isLight) {
+                        S(themeBtn, { 'background': 'rgba(255, 255, 255, 0.75)', 'border': '1px solid rgba(9, 105, 218, 0.35)', 'color': '#0550ae' });
+                    } else {
+                        S(themeBtn, { 'background': 'rgba(13, 17, 23, 0.7)', 'border': '1px solid rgba(0, 212, 255, 0.4)', 'color': '#00d4ff' });
+                    }
                 }
 
                 /* Input field */
@@ -1982,8 +2009,8 @@ with gr.Blocks(theme=gr.themes.Base(), title="Network AI Agent", css=custom_css,
                     <span class="header-subtitle">Graph-Based AI Agent for modern networks</span>
                 </div>
                 <button id="theme-toggle" title="Toggle light/dark mode">
-                    <svg id="theme-icon-sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-                    <svg id="theme-icon-moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                    <svg id="theme-icon-sun" width="22" height="22" viewBox="0 0 24 24" fill="#ffcc00" stroke="#ffcc00" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><line x1="12" y1="1" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="6.34" y2="6.34"/><line x1="17.66" y1="17.66" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="6.34" y2="17.66"/><line x1="17.66" y1="6.34" x2="19.78" y2="4.22"/></svg>
+                    <svg id="theme-icon-moon" width="22" height="22" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
                 </button>
             </div>""",
             elem_id="header-bar"
