@@ -398,6 +398,7 @@ KEY RELATIONSHIPS:
 - Node -[:BELONGS_TO]-> Fabric (nodes belong to fabrics)
 - Node -[:HAS_FAULT]-> Fault (nodes have faults with severity: warning, minor, major, critical)
 - Fabric -[:HAS_ANOMALY]-> Anomaly (fabrics have anomalies with severity: warning, major, critical)
+- Anomaly -[:AFFECTS]-> Tenant (anomalies affect specific tenants)
 - Fabric -[:HAS_ADVISORY]-> Advisory (fabrics have advisories)
 - Tenant -[:BELONGS_TO]-> Fabric (tenants belong to fabrics)
 - Tenant -[:HAS_AP]-> AppProfile (tenants have application profiles)
@@ -449,6 +450,23 @@ EXAMPLE 7 - Tenants in a fabric:
 Question: "What tenants exist in fabric 'ams-aci'?"
 MATCH (t:Tenant)-[:BELONGS_TO]->(f:Fabric) WHERE f.name = 'ams-aci'
 RETURN t.name AS tenant_name
+
+EXAMPLE 8 - Tenants affected by anomalies:
+Question: "Show me tenants with anomalies" or "Which tenants are affected by anomalies?"
+MATCH (a:Anomaly)-[:AFFECTS]->(t:Tenant)
+RETURN t.name AS tenant_name, collect(a.name) AS anomalies, collect(a.severity) AS severities
+
+EXAMPLE 9 - Details about a specific anomaly:
+Question: "Tell me about the ENDPOINT_TRAFFIC_SCORE_UNHEALTHY anomaly" or "What tenants are affected by ENDPOINT_TRAFFIC_SCORE_UNHEALTHY?"
+MATCH (a:Anomaly {{name: 'ENDPOINT_TRAFFIC_SCORE_UNHEALTHY'}})
+OPTIONAL MATCH (a)-[:AFFECTS]->(t:Tenant)
+OPTIONAL MATCH (f:Fabric)-[:HAS_ANOMALY]->(a)
+RETURN a.name, a.severity, a.category, a.details, collect(DISTINCT t.name) AS affected_tenants, collect(DISTINCT f.name) AS fabrics
+
+EXAMPLE 10 - Anomalies affecting a specific tenant:
+Question: "What anomalies affect the flexpod tenant?"
+MATCH (a:Anomaly)-[:AFFECTS]->(t:Tenant) WHERE t.name = 'flexpod'
+RETURN t.name AS tenant_name, a.name AS anomaly_name, a.severity, a.details
 
 Schema:
 {schema}
@@ -522,13 +540,17 @@ Describe the queried entity based on the Query Results:
 ## Issues Detected
 IMPORTANT: You MUST list EVERY anomaly/fault from the Query Results. Count the rows in the results and ensure your list has the same count. Do not summarize or skip any.
 
+SPECIAL CASE - If the queried entity IS an Anomaly or Fault (the 'name' field contains an anomaly name like 'ENDPOINT_TRAFFIC_SCORE_UNHEALTHY'):
+- The entity itself is the issue - describe it with its severity from the results
+- List any affected resources (tenants, nodes, fabrics) from the results
+
 For EACH row in the Query Results that contains an anomaly or fault:
 - **[Severity] NAME** - Brief explanation of what this issue means and its impact
 - If severity is not shown, write **[Unknown] NAME**
 
 Verify: If Query Results show 10 anomaly rows, you must list all 10. If results show 7, list all 7.
 
-If NO anomalies/faults appear in the results, state: "No issues found in the database for this entity"
+If NO anomalies/faults appear AND the entity is NOT itself an anomaly/fault, state: "No issues found in the database for this entity"
 
 ## Recommended Actions
 For issues ACTUALLY FOUND in the results above, provide:

@@ -37,6 +37,7 @@ dist/
 .vscode/
 .idea/
 .claude/
+claude_resume.sh
 
 # Testing & Coverage
 # ------------------
@@ -60,3 +61,4 @@ screenshots/
 openshift/
 demo-flows/
 load_generator/
+scripts/
