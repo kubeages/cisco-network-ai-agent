@@ -55,10 +55,10 @@ services:
   # 1️⃣ Graph DB (neo4j)
   # ──────────────────────────────────────────────────────────────
   neo4j:
-    image: neo4j:5    
+    image: neo4j:5
     container_name: neo4j-graph-db
     environment:
-      - NEO4J_AUTH=<NEO4J_USER>/<NEO4J_PASSWORD>
+      - NEO4J_AUTH=${NEO4J_AUTH}
       - NEO4J_PLUGINS=["apoc"]      
     ports:
       - "7474:7474"
@@ -68,7 +68,7 @@ services:
       - ./neo4j/logs:/logs:Z
       - ./neo4j/conf:/conf:Z
     healthcheck:
-      test: ["CMD-SHELL", "cypher-shell -u NEO4J_USER -p NEO4J_PASSWORD 'RETURN 1'"]
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p Ins3965! 'RETURN 1'"]
       interval: 5s
       timeout: 10s
       retries: 10
@@ -87,17 +87,20 @@ services:
         condition: service_healthy
     environment:
       # --- APIC Details ---
-      - APIC_URL=https://<APIC_IP_ADDRESS>
-      - APIC_USER=<APIC_USER>
-      - APIC_PASSWORD=<APIC_PASSWORD>
+      - APIC_URL=${APIC_URL}
+      - APIC_USER=${APIC_USER}
+      - APIC_PASSWORD=${APIC_PASSWORD}
+      - APIC_FABRIC_NAME=${APIC_FABRIC_NAME}
       # --- Nexus Dashboard Details ---
-      - ND_URL=https://<ND_IP_ADDRESS>
-      - ND_USER=<ND_USER>
-      - ND_PASSWORD=<ND_PASSWORD>
+      - ND_URL=${ND_URL}
+      - ND_USER=${ND_USER}
+      - ND_PASSWORD=${ND_PASSWORD}
       # --- Neo4j Details ---
       - NEO4J_URI=bolt://neo4j-graph-db:7687
-      - NEO4J_USER=<NEO4J_USER>
-      - NEO4J_PASSWORD=<NEO4J_PASSWORD>
+      - NEO4J_USER=${NEO4J_USER}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+      # --- Observability ---
+      - SPLUNK_OBSERVABILITY_ENABLED=${SPLUNK_OBSERVABILITY_ENABLED}
     networks:
       - gbaia-nw
     restart: unless-stopped
@@ -106,23 +109,23 @@ services:
   # 3️⃣ Backend API (AI Agent logic)
   # ──────────────────────────────────────────────────────────────
   backend-api:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: backend/Containerfile
     container_name: backend-api
     depends_on:
       neo4j:
         condition: service_healthy
     environment:
-      - OPENAI_API_KEY=<YOUR_OPENAI_API_KEY>
-      #- LOCAL_LLM_URL=https://<LOCAL_LLM_IP>:<PORT>  # Uncomment if using a local LLM
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - NEO4J_URI=bolt://neo4j-graph-db:7687
-      - NEO4J_USER=<NEO4J_USER>
-      - NEO4J_PASSWORD=<NEO4J_PASSWORD>
-      # Splunk Observability (optional - set to "true" to enable)
-      - SPLUNK_OBSERVABILITY_ENABLED=false
-      #- OTEL_SERVICE_NAME=gbaia-backend
-      #- OTEL_ENVIRONMENT=development
-      #- OTEL_EXPORTER_OTLP_ENDPOINT=http://<OTEL_COLLECTOR>:4317
-      #- SPLUNK_ACCESS_TOKEN=<YOUR_SPLUNK_TOKEN>
+      - NEO4J_USER=${NEO4J_USER}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+      - SPLUNK_OBSERVABILITY_ENABLED=${SPLUNK_OBSERVABILITY_ENABLED}
+      - AI_DEFENSE_ENABLED=false
+      - MODEL_PROXY_ENABLED=false
+    ports:
+      - "8000:8000"
     networks:
       - gbaia-nw
     restart: unless-stopped

@@ -64,7 +64,7 @@ else:
 BACKEND_URL = "http://backend-api:8000/ask"
 BACKEND_STREAM_URL = "http://backend-api:8000/ask/stream"
 SUGGESTIONS_URL = "http://backend-api:8000/suggestions"
-GRAPH_URL = "http://backend-api:8000/graph"
+GRAPH_URL = "http://backend-api:8000/api/graph"
 
 # Node styling configuration - J.A.R.V.I.S. cyan/teal palette
 NODE_COLORS = {
@@ -138,6 +138,16 @@ def fetch_graph_data():
 def generate_graph_html():
     """Generate 3D force graph visualization HTML with particle effects"""
     graph_data = fetch_graph_data()
+    print(f"🎨 generate_graph_html called: {len(graph_data.get('nodes', []))} nodes, {len(graph_data.get('edges', []))} edges")
+
+    # Debug: Show sample node types and their colors
+    if graph_data.get('nodes'):
+        sample_nodes = graph_data.get('nodes', [])[:5]
+        print("📊 Sample nodes and their assigned colors:")
+        for node in sample_nodes:
+            ntype = node.get('type', 'Unknown')
+            color = NODE_COLORS.get(ntype, NODE_COLORS['Unknown'])
+            print(f"   {ntype:15s} -> {color}")
 
     if not graph_data.get("nodes"):
         return """
@@ -203,8 +213,8 @@ def generate_graph_html():
 <!DOCTYPE html>
 <html>
 <head>
-    <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
-    <script src="https://unpkg.com/3d-force-graph"></script>
+    <script src="https://unpkg.com/three@0.149.0/build/three.min.js"></script>
+    <script src="https://unpkg.com/3d-force-graph@1.73.3"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
@@ -548,8 +558,8 @@ def generate_graph_html():
             var size = node.val || 6;
             var color = new THREE.Color(node.color);
 
-            // Create material with glow effect
-            material = new THREE.MeshLambertMaterial({{
+            // Create material with bright colors (no lighting required)
+            material = new THREE.MeshBasicMaterial({{
                 color: color,
                 transparent: true,
                 opacity: 0.9

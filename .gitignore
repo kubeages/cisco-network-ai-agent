@@ -62,3 +62,4 @@ openshift/
 demo-flows/
 load_generator/
 scripts/
+claude_resume.sh

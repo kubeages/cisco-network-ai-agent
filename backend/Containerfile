@@ -4,15 +4,17 @@ FROM python:3.11-slim
 # Establece el directorio de trabajo
 WORKDIR /app
 
+# Copia el requirements.txt desde el directorio backend
+COPY backend/requirements.txt .
+
 # Instala las dependencias
-COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copia el código de la aplicación
-COPY backend.py .
+# Copia todo el directorio backend
+COPY backend backend/
 
 # Expone el puerto que usará la API
 EXPOSE 8000
 
 # Comando para ejecutar la aplicación
-CMD ["uvicorn", "backend:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "backend.backend:app", "--host", "0.0.0.0", "--port", "8000"]

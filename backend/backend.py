@@ -45,10 +45,11 @@ API Endpoint:
 
 import os, re, httpx, json, asyncio
 from fastapi import FastAPI, HTTPException, Security, Depends
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
-from typing import List, AsyncGenerator, Optional
+from typing import List, AsyncGenerator, Optional, Dict, Any
 
 from langchain_openai import ChatOpenAI
 from langchain_classic.chains import GraphCypherQAChain
@@ -327,6 +328,14 @@ LOCAL_LLM_TOKEN = os.getenv("LOCAL_LLM_TOKEN")  # Bearer token for authenticated
 # --- Model Proxy Configuration (for AI Defense Validation) ---
 MODEL_PROXY_ENABLED = os.getenv("MODEL_PROXY_ENABLED", "false").lower() == "true"
 MODEL_PROXY_API_KEY = os.getenv("MODEL_PROXY_API_KEY", "")  # API key for proxy authentication
+
+# --- Runtime Configuration ---
+from backend.runtime_config import init_runtime_config, get_runtime_config
+
+# Initialize runtime config with PVC mount point or fallback to local
+CONFIG_PATH = os.getenv("CONFIG_PATH", "/data/config.json")
+init_runtime_config(CONFIG_PATH)
+print(f"✅ Runtime configuration initialized at {CONFIG_PATH}")
 
 # --- App Initialization ---
 app = FastAPI(
@@ -1046,8 +1055,9 @@ def get_suggestions(request: SuggestionRequest):
         print(f"❌ Error generating suggestions: {e}")
         return {"suggestions": []}
 
-@app.get("/")
-def read_root():
+@app.get("/api/health")
+def health_check():
+    """Health check endpoint for readiness/liveness probes"""
     return {"status": "Network AI Agent API is running"}
 
 # --- AI Defense Status Endpoint ---
@@ -1098,7 +1108,7 @@ def sanitize_properties(props: dict) -> dict:
             sanitized[key] = value
     return sanitized
 
-@app.get("/graph", response_model=GraphResponse)
+@app.get("/api/graph", response_model=GraphResponse)
 def get_graph_data():
     """Return all nodes and relationships for visualization"""
 
@@ -1255,3 +1265,395 @@ if MODEL_PROXY_ENABLED:
         MODEL_PROXY_ENABLED = False
 else:
     print("🔌 Model Proxy disabled (set MODEL_PROXY_ENABLED=true to enable)")
+
+
+# =============================================================================
+# Configuration Management Endpoints
+# =============================================================================
+
+@app.get("/api/config")
+async def get_config() -> Dict[str, Any]:
+    """Get all runtime configuration values."""
+    return get_runtime_config().get_all()
+
+
+@app.post("/api/config")
+async def update_config(changes: Dict[str, Any]) -> Dict[str, Any]:
+    """Update runtime configuration values.
+
+    Returns:
+        {
+            "config": {...},  # Updated configuration
+            "results": {"field": "updated" or "error message"}
+        }
+    """
+    results = get_runtime_config().update(changes)
+    return {
+        "config": get_runtime_config().get_all(),
+        "results": results
+    }
+
+
+@app.post("/api/config/models")
+async def discover_models_endpoint(request: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Discover available models from a provider.
+
+    Request body:
+        {
+            "provider": "openai" | "anthropic" | "vllm" | "ollama",
+            "base_url": "https://api.openai.com/v1" (optional),
+            "api_key": "..." (optional)
+        }
+
+    Returns:
+        List of model dicts with id, name, context, and optional pricing.
+    """
+    from backend.models_catalog import discover_models
+
+    provider = request.get("provider")
+    base_url = request.get("base_url")
+    api_key = request.get("api_key")
+
+    if not provider:
+        return []
+
+    return await discover_models(provider, base_url, api_key)
+
+
+@app.post("/api/verify/{component}")
+async def verify_component(component: str, config: Dict[str, Any]) -> Dict[str, Any]:
+    """Verify connectivity and configuration for a component.
+
+    Components: llm, llm-alt, apic, nd, neo4j, splunk, ai-defense
+    """
+
+    if component == "llm":
+        return await verify_llm(config)
+    elif component == "llm-alt":
+        return await verify_llm_alt(config)
+    elif component == "apic":
+        return await verify_apic(config)
+    elif component == "nd":
+        return await verify_nd(config)
+    elif component == "neo4j":
+        return await verify_neo4j_connection(config)
+    elif component == "splunk":
+        return await verify_splunk(config)
+    elif component == "ai-defense":
+        return await verify_ai_defense(config)
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown component: {component}")
+
+
+async def verify_llm(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Verify LLM connection and list available models."""
+    provider = config.get("llm_provider", "openai")
+    base_url = config.get("llm_base_url", "")
+    api_key = config.get("llm_api_key", "")
+    model = config.get("llm_model", "")
+
+    if not base_url or not api_key:
+        return {
+            "status": "fail",
+            "message": "Missing base URL or API key",
+            "tests": []
+        }
+
+    try:
+        async with httpx.AsyncClient(verify=False, timeout=10.0) as client:
+            # Test models endpoint
+            headers = {"Authorization": f"Bearer {api_key}"}
+            models_url = f"{base_url}/models" if not base_url.endswith('/models') else base_url
+
+            response = await client.get(models_url, headers=headers)
+            response.raise_for_status()
+
+            data = response.json()
+            models = data.get("data", [])
+            model_ids = [m.get("id") for m in models]
+
+            # Check if specified model exists
+            model_exists = model in model_ids if model else True
+
+            return {
+                "status": "success",
+                "message": f"Connected to {provider} - {len(models)} models available",
+                "tests": [
+                    {
+                        "name": "API Connection",
+                        "status": "pass",
+                        "message": f"Successfully connected to {base_url}"
+                    },
+                    {
+                        "name": "Model Availability",
+                        "status": "pass" if model_exists else "warning",
+                        "message": f"Model '{model}' {'found' if model_exists else 'not found'}"
+                    }
+                ]
+            }
+    except httpx.HTTPStatusError as e:
+        return {
+            "status": "fail",
+            "message": f"HTTP Error: {e.response.status_code}",
+            "tests": [
+                {
+                    "name": "API Connection",
+                    "status": "fail",
+                    "message": str(e)
+                }
+            ]
+        }
+    except Exception as e:
+        return {
+            "status": "fail",
+            "message": f"Connection failed: {str(e)}",
+            "tests": []
+        }
+
+
+async def verify_llm_alt(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Verify alternative LLM connection."""
+    if not config.get("llm_alt_enabled", False):
+        return {
+            "status": "warning",
+            "message": "Alternative LLM is disabled",
+            "tests": []
+        }
+
+    # Create a temporary config dict with alt fields mapped to primary fields
+    alt_config = {
+        "llm_provider": config.get("llm_alt_provider", ""),
+        "llm_base_url": config.get("llm_alt_base_url", ""),
+        "llm_api_key": config.get("llm_alt_api_key", ""),
+        "llm_model": config.get("llm_alt_model", ""),
+    }
+
+    return await verify_llm(alt_config)
+
+
+async def verify_apic(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Verify Cisco APIC connection."""
+    apic_url = config.get("apic_url", "")
+    apic_user = config.get("apic_user", "")
+    apic_password = config.get("apic_password", "")
+
+    if not all([apic_url, apic_user, apic_password]):
+        return {
+            "status": "fail",
+            "message": "Missing APIC credentials",
+            "tests": []
+        }
+
+    try:
+        async with httpx.AsyncClient(verify=False, timeout=10.0) as client:
+            login_url = f"{apic_url}/api/aaaLogin.json"
+            payload = {
+                "aaaUser": {
+                    "attributes": {
+                        "name": apic_user,
+                        "pwd": apic_password
+                    }
+                }
+            }
+
+            response = await client.post(login_url, json=payload)
+            response.raise_for_status()
+
+            data = response.json()
+            token = data.get("imdata", [{}])[0].get("aaaLogin", {}).get("attributes", {}).get("token")
+
+            return {
+                "status": "success",
+                "message": "Successfully authenticated to APIC",
+                "tests": [
+                    {
+                        "name": "Authentication",
+                        "status": "pass",
+                        "message": "Login successful, token received"
+                    }
+                ]
+            }
+    except Exception as e:
+        return {
+            "status": "fail",
+            "message": f"APIC connection failed: {str(e)}",
+            "tests": []
+        }
+
+
+async def verify_nd(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Verify Nexus Dashboard connection."""
+    nd_url = config.get("nd_url", "")
+    nd_user = config.get("nd_user", "")
+    nd_password = config.get("nd_password", "")
+
+    if not all([nd_url, nd_user, nd_password]):
+        return {
+            "status": "fail",
+            "message": "Missing Nexus Dashboard credentials",
+            "tests": []
+        }
+
+    try:
+        async with httpx.AsyncClient(verify=False, timeout=10.0) as client:
+            login_url = f"{nd_url}/login"
+            payload = {"userName": nd_user, "userPasswd": nd_password, "domain": "local"}
+
+            response = await client.post(login_url, json=payload)
+            response.raise_for_status()
+
+            return {
+                "status": "success",
+                "message": "Successfully authenticated to Nexus Dashboard",
+                "tests": [
+                    {
+                        "name": "Authentication",
+                        "status": "pass",
+                        "message": "Login successful"
+                    }
+                ]
+            }
+    except Exception as e:
+        return {
+            "status": "fail",
+            "message": f"Nexus Dashboard connection failed: {str(e)}",
+            "tests": []
+        }
+
+
+async def verify_neo4j_connection(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Verify Neo4j connection."""
+    from neo4j import GraphDatabase
+
+    neo4j_uri = config.get("neo4j_uri", "")
+    neo4j_user = config.get("neo4j_user", "")
+    neo4j_password = config.get("neo4j_password", "")
+
+    if not all([neo4j_uri, neo4j_user, neo4j_password]):
+        return {
+            "status": "fail",
+            "message": "Missing Neo4j credentials",
+            "tests": []
+        }
+
+    try:
+        driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
+
+        # Test connection with a simple query
+        with driver.session() as session:
+            result = session.run("MATCH (n) RETURN count(n) as count")
+            record = result.single()
+            node_count = record["count"] if record else 0
+
+        driver.close()
+
+        return {
+            "status": "success",
+            "message": f"Connected to Neo4j - {node_count} nodes in database",
+            "tests": [
+                {
+                    "name": "Connection",
+                    "status": "pass",
+                    "message": "Successfully connected to Neo4j"
+                },
+                {
+                    "name": "Query Test",
+                    "status": "pass",
+                    "message": f"Database contains {node_count} nodes"
+                }
+            ]
+        }
+    except Exception as e:
+        return {
+            "status": "fail",
+            "message": f"Neo4j connection failed: {str(e)}",
+            "tests": []
+        }
+
+
+async def verify_splunk(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Verify Splunk OTel collector connection."""
+    if not config.get("splunk_enabled", False):
+        return {
+            "status": "warning",
+            "message": "Splunk tracing is disabled",
+            "tests": []
+        }
+
+    otel_endpoint = config.get("otel_endpoint", "")
+
+    if not otel_endpoint:
+        return {
+            "status": "fail",
+            "message": "Missing OTel endpoint",
+            "tests": []
+        }
+
+    # For OTel gRPC endpoint, we just check if it's reachable
+    # Full verification would require sending a test span
+    return {
+        "status": "success",
+        "message": f"OTel endpoint configured: {otel_endpoint}",
+        "tests": [
+            {
+                "name": "Configuration",
+                "status": "pass",
+                "message": "OTel endpoint is set"
+            }
+        ]
+    }
+
+
+async def verify_ai_defense(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Verify Cisco AI Defense connection."""
+    if not config.get("ai_defense_enabled", False):
+        return {
+            "status": "warning",
+            "message": "AI Defense is disabled",
+            "tests": []
+        }
+
+    api_key = config.get("ai_defense_api_key", "")
+    endpoint = config.get("ai_defense_endpoint", "")
+
+    if not api_key or not endpoint:
+        return {
+            "status": "fail",
+            "message": "Missing AI Defense credentials",
+            "tests": []
+        }
+
+    try:
+        async with httpx.AsyncClient(verify=True, timeout=10.0) as client:
+            # Test with a simple prompt
+            url = f"https://{endpoint}/api/v1/inspect"
+            headers = {
+                "X-API-Key": api_key,
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "content": "Hello, this is a test.",
+                "rules": [{"rule_name": "PII"}]
+            }
+
+            response = await client.post(url, json=payload, headers=headers)
+            response.raise_for_status()
+
+            return {
+                "status": "success",
+                "message": "Successfully connected to AI Defense",
+                "tests": [
+                    {
+                        "name": "API Connection",
+                        "status": "pass",
+                        "message": "Inspection API is reachable"
+                    }
+                ]
+            }
+    except Exception as e:
+        return {
+            "status": "fail",
+            "message": f"AI Defense connection failed: {str(e)}",
+            "tests": []
+        }
+

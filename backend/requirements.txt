@@ -9,6 +9,7 @@ pydantic
 langchain-neo4j
 langchain-experimental
 httpx
+structlog
 
 # OpenTelemetry for Splunk Observability (optional)
 opentelemetry-api
