@@ -338,7 +338,7 @@ MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "")
 MCP_TOKEN = os.getenv("MCP_TOKEN", "")
 
 # --- Runtime Configuration ---
-from backend.runtime_config import init_runtime_config, get_runtime_config
+from runtime_config import init_runtime_config, get_runtime_config
 
 # Initialize runtime config with PVC mount point or fallback to local
 CONFIG_PATH = os.getenv("CONFIG_PATH", "/data/config.json")
@@ -1525,7 +1525,7 @@ async def discover_models_endpoint(request: Dict[str, Any]) -> List[Dict[str, An
     Returns:
         List of model dicts with id, name, context, and optional pricing.
     """
-    from backend.models_catalog import discover_models
+    from models_catalog import discover_models
 
     provider = request.get("provider")
     base_url = request.get("base_url")
