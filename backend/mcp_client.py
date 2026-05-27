@@ -115,32 +115,42 @@ class MCPClient:
                 return
 
         try:
-            # Get list of available tools from MCP server
-            # Note: Actual endpoint may vary based on MCP server implementation
-            url = f"{self.url}/api/tools"
+            # Get list of available tools from MCP server guidance API
+            url = f"{self.url}/api/guidance/tools"
             headers = {"Authorization": f"Bearer {self.token}"}
 
             async with self.session.get(url, headers=headers) as response:
-                if response.status == 404:
-                    # Fallback: Try to get tools from OpenAPI specs
-                    logger.warning("tools_endpoint_not_found", trying_fallback=True)
-                    await self._discover_tools_from_openapi()
-                    return
-
                 response.raise_for_status()
                 tools_data = await response.json()
 
-                # Parse tools response
+                # Parse tools response - ND MCP returns list of operation dicts
                 self.tools = {}
-                for tool in tools_data.get("tools", []):
-                    tool_name = tool.get("name")
-                    if tool_name:
-                        self.tools[tool_name] = {
-                            "description": tool.get("description", ""),
-                            "parameters": tool.get("parameters", {}),
-                            "method": tool.get("method", "GET"),
-                            "read_only": tool.get("method", "GET") == "GET"
-                        }
+                if isinstance(tools_data, list):
+                    for tool in tools_data:
+                        tool_name = tool.get("operationId") or tool.get("name")
+                        if tool_name:
+                            method = tool.get("method", "GET").upper()
+                            self.tools[tool_name] = {
+                                "description": tool.get("summary") or tool.get("description", ""),
+                                "parameters": tool.get("parameters", {}),
+                                "method": method,
+                                "read_only": method == "GET",
+                                "path": tool.get("path", ""),
+                                "api": tool.get("api", "")
+                            }
+                elif isinstance(tools_data, dict) and "tools" in tools_data:
+                    for tool in tools_data["tools"]:
+                        tool_name = tool.get("operationId") or tool.get("name")
+                        if tool_name:
+                            method = tool.get("method", "GET").upper()
+                            self.tools[tool_name] = {
+                                "description": tool.get("summary") or tool.get("description", ""),
+                                "parameters": tool.get("parameters", {}),
+                                "method": method,
+                                "read_only": method == "GET",
+                                "path": tool.get("path", ""),
+                                "api": tool.get("api", "")
+                            }
 
                 self.tools_last_updated = datetime.now()
                 logger.info("tools_discovered", count=len(self.tools))
