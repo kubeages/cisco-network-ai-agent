@@ -1276,6 +1276,15 @@ async def ask_agent_stream(query: Query):
         final_response = {'status': 'complete', 'message': '✅ Response complete!', 'answer': answer}
         if AI_DEFENSE_ENABLED:
             final_response['security'] = security_info
+
+        # TODO: Implement full query routing (neo4j/mcp/hybrid) in streaming mode
+        # For now, add Neo4j source since streaming currently only uses Neo4j
+        final_response['sources'] = [{
+            "type": "neo4j",
+            "description": "Network topology and knowledge graph",
+            "details": {}
+        }]
+
         yield f"data: {json.dumps(final_response)}\n\n"
 
     return StreamingResponse(

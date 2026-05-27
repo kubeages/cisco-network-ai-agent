@@ -1024,6 +1024,11 @@ def get_agent_response_streaming(question, history, source="user"):
 
                         if status == 'complete':
                             answer = data.get('answer', 'No answer received.')
+                            sources = data.get('sources', [])
+
+                            # Add source indicators to answer
+                            answer = format_answer_with_sources(answer, sources)
+
                             history.append({"role": "assistant", "content": answer})
                             yield history, "", question, answer
                         elif status == 'section':
@@ -1053,6 +1058,31 @@ def get_agent_response_streaming(question, history, source="user"):
         yield history, "", question, answer
 
 
+def format_answer_with_sources(answer, sources):
+    """Add source indicators to the answer"""
+    if not sources:
+        return answer
+
+    # Build source indicators
+    source_icons = {
+        "neo4j": "📊",  # Graph database icon
+        "mcp": "🔌"      # Live data/plugin icon
+    }
+
+    source_badges = []
+    for source in sources:
+        icon = source_icons.get(source.get("type", ""), "❓")
+        desc = source.get("description", "Unknown source")
+        source_badges.append(f"{icon} {desc}")
+
+    # Add source footer to answer
+    if source_badges:
+        source_text = "\n\n---\n**Data Sources:**\n" + "\n".join(f"- {badge}" for badge in source_badges)
+        return answer + source_text
+
+    return answer
+
+
 def get_agent_response(question, history):
     """Get answer from backend (non-streaming fallback)"""
     history = history or []
@@ -1076,6 +1106,11 @@ def get_agent_response(question, history):
         response.raise_for_status()
         data = response.json()
         answer = data.get("answer", "No valid answer received.")
+        sources = data.get("sources", [])
+
+        # Add source indicators to answer
+        answer = format_answer_with_sources(answer, sources)
+
     except Exception as e:
         answer = f"Error: {e}"
 
