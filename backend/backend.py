@@ -57,7 +57,7 @@ from langchain_community.graphs import Neo4jGraph
 from langchain_core.prompts import PromptTemplate
 
 # MCP Client for Nexus Dashboard integration
-from backend.mcp_client import init_mcp_client, shutdown_mcp_client, get_mcp_client
+from mcp_client import init_mcp_client, shutdown_mcp_client, get_mcp_client
 
 # --- Optional Splunk Observability / OpenTelemetry Instrumentation ---
 SPLUNK_ENABLED = os.getenv("SPLUNK_OBSERVABILITY_ENABLED", "false").lower() == "true"
