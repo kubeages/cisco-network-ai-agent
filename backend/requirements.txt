@@ -11,6 +11,11 @@ langchain-experimental
 httpx
 structlog
 
+# MCP (Model Context Protocol) client for ND integration
+mcp
+aiohttp
+sseclient-py
+
 # OpenTelemetry for Splunk Observability (optional)
 opentelemetry-api
 opentelemetry-sdk

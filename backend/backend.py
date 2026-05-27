@@ -56,6 +56,9 @@ from langchain_classic.chains import GraphCypherQAChain
 from langchain_community.graphs import Neo4jGraph
 from langchain_core.prompts import PromptTemplate
 
+# MCP Client for Nexus Dashboard integration
+from backend.mcp_client import init_mcp_client, shutdown_mcp_client, get_mcp_client
+
 # --- Optional Splunk Observability / OpenTelemetry Instrumentation ---
 SPLUNK_ENABLED = os.getenv("SPLUNK_OBSERVABILITY_ENABLED", "false").lower() == "true"
 
@@ -329,6 +332,11 @@ LOCAL_LLM_TOKEN = os.getenv("LOCAL_LLM_TOKEN")  # Bearer token for authenticated
 MODEL_PROXY_ENABLED = os.getenv("MODEL_PROXY_ENABLED", "false").lower() == "true"
 MODEL_PROXY_API_KEY = os.getenv("MODEL_PROXY_API_KEY", "")  # API key for proxy authentication
 
+# --- MCP (Model Context Protocol) Configuration ---
+MCP_ENABLED = os.getenv("MCP_ENABLED", "false").lower() == "true"
+MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "")
+MCP_TOKEN = os.getenv("MCP_TOKEN", "")
+
 # --- Runtime Configuration ---
 from backend.runtime_config import init_runtime_config, get_runtime_config
 
@@ -396,6 +404,48 @@ else:
     cypher_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, http_client=openai_client, http_async_client=openai_async_client)
     qa_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, http_client=openai_client, http_async_client=openai_async_client)
     suggestion_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3, http_client=openai_client, http_async_client=openai_async_client)
+
+
+# --- MCP Client Initialization ---
+@app.on_event("startup")
+async def startup_event():
+    """Initialize MCP client on application startup"""
+    if MCP_ENABLED:
+        if not MCP_SERVER_URL or not MCP_TOKEN:
+            print("⚠️ MCP enabled but MCP_SERVER_URL or MCP_TOKEN not set - MCP integration disabled")
+            return
+
+        try:
+            print(f"▶️  Connecting to MCP server at {MCP_SERVER_URL}...")
+            await init_mcp_client(url=MCP_SERVER_URL, token=MCP_TOKEN)
+
+            mcp = get_mcp_client()
+            if mcp and mcp.connected:
+                tool_count = len(mcp.tools)
+                read_only_count = len(mcp.get_read_only_tools())
+                categories = mcp.get_tool_categories()
+
+                print(f"✅ MCP client connected - {tool_count} tools discovered ({read_only_count} read-only)")
+                print(f"   Categories: Insights={len(categories['insights'])}, "
+                      f"Manage={len(categories['manage'])}, "
+                      f"Infrastructure={len(categories['infrastructure'])}, "
+                      f"OneManage={len(categories['onemanage'])}")
+        except Exception as e:
+            print(f"⚠️ Failed to initialize MCP client: {e}")
+            print("   Backend will continue without MCP integration")
+    else:
+        print("📦 MCP integration disabled (set MCP_ENABLED=true to enable)")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup MCP client on application shutdown"""
+    if MCP_ENABLED:
+        try:
+            await shutdown_mcp_client()
+            print("✅ MCP client disconnected")
+        except Exception as e:
+            print(f"⚠️ Error during MCP shutdown: {e}")
 
 
 # --- Define the Prompt Templates ---
@@ -1095,6 +1145,173 @@ def test_ai_defense(request: AIDefenseTestRequest):
         "attack_technique": result.attack_technique,
         "action": result.action
     }
+
+# --- MCP Status and Tools Endpoints ---
+@app.get("/mcp/status")
+def mcp_status():
+    """Check MCP integration status"""
+    mcp = get_mcp_client()
+
+    if not MCP_ENABLED:
+        return {
+            "enabled": False,
+            "connected": False,
+            "message": "MCP integration is disabled"
+        }
+
+    if not mcp:
+        return {
+            "enabled": True,
+            "connected": False,
+            "message": "MCP client not initialized"
+        }
+
+    categories = mcp.get_tool_categories()
+    read_only_tools = mcp.get_read_only_tools()
+
+    return {
+        "enabled": True,
+        "connected": mcp.connected,
+        "server_url": MCP_SERVER_URL,
+        "tools_total": len(mcp.tools),
+        "tools_read_only": len(read_only_tools),
+        "tools_write": len(mcp.tools) - len(read_only_tools),
+        "categories": {
+            "insights": len(categories["insights"]),
+            "manage": len(categories["manage"]),
+            "infrastructure": len(categories["infrastructure"]),
+            "onemanage": len(categories["onemanage"])
+        },
+        "last_updated": mcp.tools_last_updated.isoformat() if mcp.tools_last_updated else None
+    }
+
+
+@app.get("/mcp/tools")
+def mcp_list_tools(read_only: bool = True, category: Optional[str] = None):
+    """
+    List available MCP tools
+
+    Args:
+        read_only: Only return read-only (GET) operations (default: True)
+        category: Filter by category (insights, manage, infrastructure, onemanage)
+    """
+    mcp = get_mcp_client()
+
+    if not mcp or not mcp.connected:
+        raise HTTPException(status_code=503, detail="MCP client not available")
+
+    # Get all tools
+    if category:
+        categories = mcp.get_tool_categories()
+        tool_names = categories.get(category.lower(), [])
+        tools = [
+            {
+                "name": name,
+                "description": mcp.tools[name].get("description", ""),
+                "read_only": mcp.tools[name].get("read_only", False),
+                "method": mcp.tools[name].get("method", "UNKNOWN")
+            }
+            for name in tool_names
+            if name in mcp.tools and (not read_only or mcp.tools[name].get("read_only", False))
+        ]
+    else:
+        tools = [
+            {
+                "name": name,
+                "description": info.get("description", ""),
+                "read_only": info.get("read_only", False),
+                "method": info.get("method", "UNKNOWN")
+            }
+            for name, info in mcp.tools.items()
+            if not read_only or info.get("read_only", False)
+        ]
+
+    return {
+        "count": len(tools),
+        "tools": tools,
+        "filters": {
+            "read_only": read_only,
+            "category": category
+        }
+    }
+
+
+@app.get("/mcp/tools/{tool_name}")
+def mcp_get_tool(tool_name: str):
+    """Get detailed information about a specific MCP tool"""
+    mcp = get_mcp_client()
+
+    if not mcp or not mcp.connected:
+        raise HTTPException(status_code=503, detail="MCP client not available")
+
+    if tool_name not in mcp.tools:
+        raise HTTPException(status_code=404, detail=f"Tool '{tool_name}' not found")
+
+    tool_info = mcp.tools[tool_name]
+    return {
+        "name": tool_name,
+        "description": tool_info.get("description", ""),
+        "method": tool_info.get("method", "UNKNOWN"),
+        "read_only": tool_info.get("read_only", False),
+        "parameters": tool_info.get("parameters", {}),
+        "path": tool_info.get("path", "")
+    }
+
+
+class MCPToolCallRequest(BaseModel):
+    tool: str
+    arguments: Dict[str, Any] = Field(default_factory=dict)
+    timeout: Optional[int] = None
+
+
+@app.post("/mcp/execute")
+async def mcp_execute_tool(request: MCPToolCallRequest):
+    """
+    Execute an MCP tool (admin only - for testing)
+
+    This endpoint allows direct tool execution for testing purposes.
+    In production, tools should be called via LLM agent.
+    """
+    mcp = get_mcp_client()
+
+    if not mcp or not mcp.connected:
+        raise HTTPException(status_code=503, detail="MCP client not available")
+
+    try:
+        result = await mcp.call_tool(
+            tool_name=request.tool,
+            arguments=request.arguments,
+            timeout=request.timeout
+        )
+        return {
+            "success": True,
+            "tool": request.tool,
+            "result": result
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Tool execution failed: {str(e)}")
+
+
+@app.post("/mcp/refresh")
+async def mcp_refresh_tools():
+    """Force refresh MCP tool discovery"""
+    mcp = get_mcp_client()
+
+    if not mcp:
+        raise HTTPException(status_code=503, detail="MCP client not available")
+
+    try:
+        await mcp.discover_tools(force_refresh=True)
+        return {
+            "success": True,
+            "tools_count": len(mcp.tools),
+            "updated_at": mcp.tools_last_updated.isoformat() if mcp.tools_last_updated else None
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Tool refresh failed: {str(e)}")
+
 
 def sanitize_properties(props: dict) -> dict:
     """Convert non-serializable Neo4j types to strings"""
