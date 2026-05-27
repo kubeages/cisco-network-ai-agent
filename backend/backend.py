@@ -301,10 +301,17 @@ class SecurityInfo(BaseModel):
     blocked: bool = False
     warning: Optional[str] = None
 
+class DataSource(BaseModel):
+    """Tracks the source of data in the response"""
+    type: str  # "neo4j" or "mcp"
+    description: str  # Human-readable description of what was queried
+    details: Optional[Dict[str, Any]] = None  # Additional metadata (query, tool name, etc.)
+
 class Response(BaseModel):
     answer: str
     suggestions: List[str] = Field(default_factory=list)
     security: Optional[SecurityInfo] = None
+    sources: List[DataSource] = Field(default_factory=list)  # Track data sources
 
 class GraphNode(BaseModel):
     id: str
@@ -767,16 +774,205 @@ Return only a list of three direct queries, one per line, without numbers or bul
 Follow-up queries:"""
 )
 
+# --- Query Classification and MCP Integration ---
+def classify_query_intent(question: str) -> str:
+    """
+    Classify query intent to determine data source.
+
+    Returns:
+        "neo4j" - Static topology, relationships, historical data
+        "mcp" - Live metrics, current status, real-time data
+        "hybrid" - Requires both sources
+    """
+    question_lower = question.lower()
+
+    # Keywords indicating live/real-time data (MCP)
+    live_keywords = [
+        "current", "now", "live", "real-time", "latest",
+        "health", "status", "cpu", "memory", "bandwidth",
+        "utilization", "performance", "metric", "stat"
+    ]
+
+    # Keywords indicating topology/relationships (Neo4j)
+    topology_keywords = [
+        "connected", "relationship", "belongs", "topology",
+        "graph", "path", "neighbor", "linked", "structure"
+    ]
+
+    # Keywords indicating historical data (Neo4j)
+    historical_keywords = [
+        "history", "past", "previous", "before", "changed",
+        "was", "were", "used to", "last month", "yesterday"
+    ]
+
+    # Check for live data indicators
+    has_live = any(keyword in question_lower for keyword in live_keywords)
+    has_topology = any(keyword in question_lower for keyword in topology_keywords)
+    has_historical = any(keyword in question_lower for keyword in historical_keywords)
+
+    if has_historical:
+        return "neo4j"  # Historical data only in Neo4j
+    elif has_live and has_topology:
+        return "hybrid"  # Needs both topology and live data
+    elif has_live:
+        return "mcp"  # Live data only
+    else:
+        return "neo4j"  # Default to Neo4j for topology/anomalies
+
+
+async def query_mcp_with_llm(question: str, chat_history: str = "") -> tuple[str, List[DataSource]]:
+    """
+    Use LLM to select and execute appropriate MCP tools for the question.
+
+    Returns:
+        Tuple of (answer text, list of data sources)
+    """
+    mcp = get_mcp_client()
+    if not mcp or not mcp.connected:
+        return ("MCP integration is not available at this time.", [])
+
+    try:
+        # Get available read-only tools
+        tools = mcp.get_read_only_tools()
+        if not tools:
+            return ("No MCP tools available.", [])
+
+        # For now, use a simple heuristic to select tools
+        # TODO: Implement proper LLM-based tool selection
+        question_lower = question.lower()
+
+        # Simple keyword-based tool selection
+        selected_tools = []
+        if "health" in question_lower or "status" in question_lower:
+            # Look for health/status related tools
+            selected_tools = [t for t in tools[:10] if "health" in t.lower() or "status" in t.lower()]
+        elif "anomal" in question_lower:
+            selected_tools = [t for t in tools[:10] if "anomal" in t.lower()]
+        elif "compliance" in question_lower:
+            selected_tools = [t for t in tools[:10] if "compliance" in t.lower()]
+
+        if not selected_tools:
+            # Default to first available tool as fallback
+            selected_tools = tools[:1]
+
+        # Execute selected tools
+        sources = []
+        results = []
+
+        for tool_name in selected_tools[:3]:  # Limit to 3 tools max
+            try:
+                result = await mcp.call_tool(tool_name, {})
+
+                # Extract text from MCP response
+                content = result.get("content", [])
+                if content and len(content) > 0:
+                    text = content[0].get("text", "")
+                    results.append(f"Tool: {tool_name}\nResult: {text}")
+
+                    sources.append(DataSource(
+                        type="mcp",
+                        description=f"Real-time data from {tool_name}",
+                        details={"tool": tool_name, "arguments": {}}
+                    ))
+            except Exception as e:
+                print(f"⚠️ Failed to execute tool {tool_name}: {e}")
+                continue
+
+        if results:
+            # Synthesize answer from tool results
+            combined_results = "\n\n".join(results)
+
+            # Use LLM to format the results into a natural answer
+            synthesis_prompt = f"""Based on the following real-time data from Nexus Dashboard, provide a clear and concise answer to the question.
+
+Question: {question}
+
+Real-time Data:
+{combined_results}
+
+Answer:"""
+
+            qa_response = qa_llm.invoke(synthesis_prompt)
+            answer = qa_response.content if hasattr(qa_response, 'content') else str(qa_response)
+
+            return (answer, sources)
+        else:
+            return ("No real-time data available for this query.", [])
+
+    except Exception as e:
+        print(f"❌ MCP query error: {e}")
+        return (f"Error querying real-time data: {str(e)}", [])
+
+
+async def query_hybrid(question: str, chat_history: str = "") -> tuple[str, List[DataSource]]:
+    """
+    Execute hybrid query using both Neo4j and MCP.
+
+    Returns:
+        Tuple of (answer text, list of data sources)
+    """
+    all_sources = []
+
+    # Step 1: Get topology/relationships from Neo4j
+    try:
+        cypher_chain = CYPHER_PROMPT | cypher_llm
+        cypher_response = cypher_chain.invoke({
+            "schema": graph.get_schema,
+            "question": question,
+            "chat_history": chat_history
+        })
+        raw_cypher = cypher_response.content if hasattr(cypher_response, 'content') else str(cypher_response)
+        clean_cypher = clean_cypher_output(raw_cypher)
+
+        if clean_cypher and clean_cypher.strip().upper().startswith(('MATCH', 'OPTIONAL', 'WITH', 'CALL', 'RETURN')):
+            neo4j_result = traced_neo4j_query(graph, clean_cypher, "neo4j.cypher.hybrid_query")
+
+            all_sources.append(DataSource(
+                type="neo4j",
+                description="Network topology and relationships from knowledge graph",
+                details={"query": clean_cypher, "result_count": len(neo4j_result)}
+            ))
+
+            neo4j_context = f"Topology Data:\n{str(neo4j_result)}"
+        else:
+            neo4j_context = "No topology data available."
+    except Exception as e:
+        print(f"⚠️ Neo4j query failed in hybrid mode: {e}")
+        neo4j_context = "Topology data unavailable."
+
+    # Step 2: Get live data from MCP
+    mcp_answer, mcp_sources = await query_mcp_with_llm(question, chat_history)
+    all_sources.extend(mcp_sources)
+
+    # Step 3: Merge results
+    merge_prompt = f"""You are a network operations assistant. Combine the following information to answer the user's question comprehensively.
+
+Question: {question}
+
+{neo4j_context}
+
+Live Data:
+{mcp_answer}
+
+Provide a comprehensive answer that integrates both the topology/relationship data and the live operational data:"""
+
+    qa_response = qa_llm.invoke(merge_prompt)
+    answer = qa_response.content if hasattr(qa_response, 'content') else str(qa_response)
+
+    return (answer, all_sources)
+
+
 # --- API Endpoint ---
 @app.post("/ask", response_model=Response)
-def ask_agent(query: Query):
+async def ask_agent(query: Query):
     # Convert Gradio's history format to a simple string for the prompt
     history_str = "\n".join([f"Human: {q}\nAssistant: {a}" for q, a in query.chat_history])
 
     print(f"🤖 Received question: {query.question} with history: {history_str}")
 
-    # Initialize security info
+    # Initialize security info and sources
     security_info = SecurityInfo()
+    data_sources = []
 
     # --- Cisco AI Defense: Inspect user prompt ---
     if AI_DEFENSE_ENABLED and AI_DEFENSE_INSPECT_PROMPTS:
@@ -795,49 +991,74 @@ def ask_agent(query: Query):
             return Response(
                 answer="I cannot process this request due to security policy restrictions. Please rephrase your question.",
                 suggestions=[],
-                security=security_info
+                security=security_info,
+                sources=[]
             )
         elif prompt_result.action == "warn":
             security_info.warning = f"⚠️ Security Notice: Potential concerns detected in your question ({prompt_result.severity}): {', '.join(prompt_result.violated_rules)}"
             print(f"⚠️ Prompt warning from AI Defense: {prompt_result.violated_rules}")
 
+    # --- Query Classification and Routing ---
+    query_intent = classify_query_intent(query.question)
+    print(f"🔍 Query classified as: {query_intent}")
+
     try:
-        # Step 1: Generate Cypher using the LLM
-        cypher_chain = CYPHER_PROMPT | cypher_llm
-        cypher_response = cypher_chain.invoke({
-            "schema": graph.get_schema,
-            "question": query.question,
-            "chat_history": history_str
-        })
-        raw_cypher = cypher_response.content if hasattr(cypher_response, 'content') else str(cypher_response)
-        print(f"📝 Raw Cypher generated:\n{raw_cypher}")
+        if query_intent == "mcp":
+            # MCP-only query (live data)
+            print("🔌 Executing MCP-only query...")
+            answer, data_sources = await query_mcp_with_llm(query.question, history_str)
 
-        # Step 2: Clean the Cypher (remove explanatory text)
-        clean_cypher = clean_cypher_output(raw_cypher)
-        print(f"🧹 Cleaned Cypher:\n{clean_cypher}")
+        elif query_intent == "hybrid":
+            # Hybrid query (Neo4j + MCP)
+            print("🔄 Executing hybrid query (Neo4j + MCP)...")
+            answer, data_sources = await query_hybrid(query.question, history_str)
 
-        # Step 3: Execute the Cypher query
-        if not clean_cypher or not clean_cypher.strip().upper().startswith(('MATCH', 'OPTIONAL', 'WITH', 'CALL', 'RETURN')):
-            raise ValueError("Generated text does not appear to be a valid Cypher query")
-
-        query_result = traced_neo4j_query(graph, clean_cypher, "neo4j.cypher.user_query")
-        print(f"📊 Query returned {len(query_result)} results")
-
-        # Step 4: Generate answer using qa_llm
-        # Use detailed template for anomaly queries to include recommended actions
-        if is_anomaly_query(query.question):
-            qa_template = QA_TEMPLATE_DETAILED
-            print("📋 Using detailed template for anomaly query")
         else:
-            qa_template = QA_TEMPLATE_CONCISE
+            # Neo4j-only query (topology/relationships)
+            print("📊 Executing Neo4j-only query...")
+            # Step 1: Generate Cypher using the LLM
+            cypher_chain = CYPHER_PROMPT | cypher_llm
+            cypher_response = cypher_chain.invoke({
+                "schema": graph.get_schema,
+                "question": query.question,
+                "chat_history": history_str
+            })
+            raw_cypher = cypher_response.content if hasattr(cypher_response, 'content') else str(cypher_response)
+            print(f"📝 Raw Cypher generated:\n{raw_cypher}")
 
-        qa_prompt_dynamic = PromptTemplate.from_template(qa_template)
-        qa_chain = qa_prompt_dynamic | qa_llm
-        qa_response = qa_chain.invoke({
-            "context": str(query_result),
-            "question": query.question
-        })
-        answer = qa_response.content if hasattr(qa_response, 'content') else str(qa_response)
+            # Step 2: Clean the Cypher (remove explanatory text)
+            clean_cypher = clean_cypher_output(raw_cypher)
+            print(f"🧹 Cleaned Cypher:\n{clean_cypher}")
+
+            # Step 3: Execute the Cypher query
+            if not clean_cypher or not clean_cypher.strip().upper().startswith(('MATCH', 'OPTIONAL', 'WITH', 'CALL', 'RETURN')):
+                raise ValueError("Generated text does not appear to be a valid Cypher query")
+
+            query_result = traced_neo4j_query(graph, clean_cypher, "neo4j.cypher.user_query")
+            print(f"📊 Query returned {len(query_result)} results")
+
+            # Track Neo4j source
+            data_sources.append(DataSource(
+                type="neo4j",
+                description="Network topology and knowledge graph",
+                details={"query": clean_cypher, "result_count": len(query_result)}
+            ))
+
+            # Step 4: Generate answer using qa_llm
+            # Use detailed template for anomaly queries to include recommended actions
+            if is_anomaly_query(query.question):
+                qa_template = QA_TEMPLATE_DETAILED
+                print("📋 Using detailed template for anomaly query")
+            else:
+                qa_template = QA_TEMPLATE_CONCISE
+
+            qa_prompt_dynamic = PromptTemplate.from_template(qa_template)
+            qa_chain = qa_prompt_dynamic | qa_llm
+            qa_response = qa_chain.invoke({
+                "context": str(query_result),
+                "question": query.question
+            })
+            answer = qa_response.content if hasattr(qa_response, 'content') else str(qa_response)
 
         # --- Cisco AI Defense: Inspect LLM response ---
         if AI_DEFENSE_ENABLED and AI_DEFENSE_INSPECT_RESPONSES:
@@ -870,12 +1091,14 @@ def ask_agent(query: Query):
             answer = f"I encountered an error while processing your question. Please try rephrasing your question or asking something simpler."
 
     print(f"💡 Generated answer: {answer}")
+    print(f"📍 Data sources used: {[s.type for s in data_sources]}")
 
-    # Return answer with security info if AI Defense is enabled
+    # Return answer with security info and data sources
     return Response(
         answer=answer,
         suggestions=[],
-        security=security_info if AI_DEFENSE_ENABLED else None
+        security=security_info if AI_DEFENSE_ENABLED else None,
+        sources=data_sources
     )
 
 
