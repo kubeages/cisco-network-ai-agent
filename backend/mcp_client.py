@@ -153,9 +153,15 @@ class MCPClient:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error("sse_connection_error", error=str(e))
+                error_str = str(e)
+
+                # TransferEncodingError is expected when SSE stream times out
+                if "TransferEncodingError" in error_str or "Not enough data" in error_str:
+                    logger.debug("sse_timeout", message="SSE stream timeout (expected)")
+                else:
+                    logger.error("sse_connection_error", error=error_str)
+
                 if self._should_reconnect:
-                    logger.info("reconnecting", delay=self.reconnect_delay)
                     await asyncio.sleep(self.reconnect_delay)
 
     async def _connect_sse(self):
@@ -193,6 +199,12 @@ class MCPClient:
 
                     elif decoded_line.startswith('data:'):
                         data_str = decoded_line.split(':', 1)[1].strip()
+
+                        # Skip non-JSON data (e.g., "/mcp/message" endpoint info)
+                        if not data_str.startswith('{'):
+                            logger.debug("sse_non_json_data", data=data_str[:100])
+                            continue
+
                         try:
                             data = json.loads(data_str)
                             await self._handle_message(data)
