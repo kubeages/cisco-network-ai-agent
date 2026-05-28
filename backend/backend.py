@@ -43,7 +43,7 @@ API Endpoint:
 
 """
 
-import os, re, httpx, json, asyncio
+import os, re, httpx, json, asyncio, tiktoken
 from fastapi import FastAPI, HTTPException, Security, Depends
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -1334,15 +1334,27 @@ Selected tools:"""
 
         if results:
             # Truncate results to fit within token budget
-            # Target: ~6000 tokens for results (leave 2000 for prompt + answer)
-            MAX_RESULT_TOKENS = 6000
+            # Target: ~4000 tokens for results (leave 4000 for prompt + answer + overhead)
+            MAX_RESULT_TOKENS = 4000
 
-            # Estimate tokens (rough: ~4 chars per token)
+            # Use tiktoken for accurate token counting
+            try:
+                encoding = tiktoken.get_encoding("cl100k_base")  # GPT-4 encoding, close enough for estimation
+            except:
+                # Fallback to rough estimation if tiktoken fails
+                encoding = None
+
+            def count_tokens(text: str) -> int:
+                if encoding:
+                    return len(encoding.encode(text))
+                else:
+                    return len(text) // 4  # Rough fallback
+
             truncated_results = []
             current_tokens = 0
 
             for result in results:
-                result_tokens = len(result) // 4  # Rough estimate
+                result_tokens = count_tokens(result)
                 if current_tokens + result_tokens <= MAX_RESULT_TOKENS:
                     truncated_results.append(result)
                     current_tokens += result_tokens
@@ -1350,14 +1362,25 @@ Selected tools:"""
                     # Add truncated version if space allows
                     remaining_tokens = MAX_RESULT_TOKENS - current_tokens
                     if remaining_tokens > 100:  # At least 100 tokens worth
-                        chars_to_include = remaining_tokens * 4
-                        truncated_results.append(result[:chars_to_include] + "\n[... truncated ...]")
+                        # Binary search to find how much text fits
+                        left, right = 0, len(result)
+                        while left < right:
+                            mid = (left + right + 1) // 2
+                            if count_tokens(result[:mid]) <= remaining_tokens - 20:  # Reserve 20 for truncation marker
+                                left = mid
+                            else:
+                                right = mid - 1
+                        if left > 0:
+                            truncated_results.append(result[:left] + "\n[... truncated ...]")
+                            current_tokens += count_tokens(result[:left] + "\n[... truncated ...]")
                     break
 
             combined_results = "\n\n".join(truncated_results)
 
             if len(truncated_results) < len(results):
-                print(f"⚠️ Truncated MCP results: kept {len(truncated_results)}/{len(results)} results to fit token budget")
+                print(f"⚠️ Truncated MCP results: kept {len(truncated_results)}/{len(results)} results ({current_tokens} tokens) to fit budget")
+            else:
+                print(f"✅ All {len(results)} MCP results fit within token budget ({current_tokens} tokens)")
 
             # Use LLM to format the results into a natural answer
             synthesis_prompt = f"""Based on the following real-time data from Nexus Dashboard, provide a clear and concise answer to the question.
