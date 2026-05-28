@@ -456,11 +456,27 @@ async def shutdown_event():
 
 
 # --- Define the Prompt Templates ---
-CYPHER_GENERATION_TEMPLATE = """Generate a Cypher query. Output ONLY the query, no markdown.
+CYPHER_GENERATION_TEMPLATE = """Generate a Cypher query. Output ONLY the query, no markdown, no explanations.
 
-RULE: Every variable in RETURN must be defined in MATCH or OPTIONAL MATCH first!
+=== CRITICAL SYNTAX RULES ===
+1. ALWAYS start with MATCH or OPTIONAL MATCH (never start with RETURN)
+2. Use OPTIONAL MATCH for relationships that might not exist
+3. Define ALL variables in MATCH/OPTIONAL MATCH before using them in RETURN
+4. Use only ONE RETURN statement at the end of the query
+5. NEVER use relationship patterns like (n)-[:REL]->(m) inside RETURN clause
+6. Property filters go in WHERE clause, not inline in MATCH (except for simple node property matches)
 
-KEY RELATIONSHIPS:
+=== COMMON ERRORS TO AVOID ===
+❌ WRONG: RETURN n.name, (n)-[:HAS_FAULT]->(f)
+✅ RIGHT: MATCH (n)-[:HAS_FAULT]->(f) ... RETURN n.name, f.code
+
+❌ WRONG: MATCH (n) RETURN n.name RETURN n.role
+✅ RIGHT: MATCH (n) RETURN n.name, n.role
+
+❌ WRONG: RETURN n.name WHERE n.role = 'leaf'
+✅ RIGHT: MATCH (n) WHERE n.role = 'leaf' RETURN n.name
+
+=== KEY RELATIONSHIPS ===
 - Node -[:BELONGS_TO]-> Fabric (nodes belong to fabrics)
 - Node -[:HAS_FAULT]-> Fault (nodes have faults with severity: warning, minor, major, critical)
 - Fabric -[:HAS_ANOMALY]-> Anomaly (fabrics have anomalies with severity: warning, major, critical)
@@ -474,65 +490,105 @@ KEY RELATIONSHIPS:
 
 IMPORTANT: Severity values are ALWAYS lowercase: 'critical', 'major', 'warning', 'minor'
 
-EXAMPLE 1 - Nodes with warning faults in a fabric:
+=== NODE PROPERTIES ===
+Common Node properties: name, role (spine/leaf), model, address, serial, fabricSt (status)
+Common Fabric properties: name, health, status
+Common Fault properties: code, severity, descr, cause, created
+Common Anomaly properties: name, severity, category, details, lastSeen
+
+=== EXAMPLES ===
+
+EXAMPLE 1 - Node details with fabric and faults:
+Question: "Show me details about node 'leaf-102' including its role, model, and any faults"
+MATCH (n:Node {name: 'leaf-102'})-[:BELONGS_TO]->(f:Fabric)
+OPTIONAL MATCH (n)-[:HAS_FAULT]->(fault:Fault)
+RETURN n.name, n.role, n.model, n.address, n.serial, f.name AS fabric_name,
+       fault.code AS fault_code, fault.severity AS fault_severity, fault.descr AS fault_description
+
+EXAMPLE 2 - Nodes with warning faults in a fabric:
 Question: "List nodes in fabric 'ams-aci' with warning faults"
-MATCH (n:Node)-[:BELONGS_TO]->(f:Fabric) WHERE f.name = 'ams-aci'
-MATCH (n)-[:HAS_FAULT]->(fault:Fault) WHERE fault.severity = 'warning'
+MATCH (n:Node)-[:BELONGS_TO]->(f:Fabric)
+WHERE f.name = 'ams-aci'
+MATCH (n)-[:HAS_FAULT]->(fault:Fault)
+WHERE fault.severity = 'warning'
 RETURN n.name AS node_name, fault.code AS fault_code, fault.descr AS description
 
-EXAMPLE 2 - List ALL anomalies in a fabric with full details:
-Question: "List all anomalies in fabric 'ams-aci'" or "What anomalies are in fabric 'ams-aci'?"
-MATCH (f:Fabric)-[:HAS_ANOMALY]->(a:Anomaly) WHERE f.name = 'ams-aci'
+EXAMPLE 3 - List ALL anomalies in a fabric with full details:
+Question: "List all anomalies in fabric 'ams-aci'"
+MATCH (f:Fabric)-[:HAS_ANOMALY]->(a:Anomaly)
+WHERE f.name = 'ams-aci'
 RETURN a.name AS anomaly_name, a.severity, a.lastSeen
 ORDER BY a.severity
 
-EXAMPLE 3 - All faults for a specific node:
+EXAMPLE 4 - All faults for a specific node:
 Question: "Show faults for node 'leaf-104'"
-MATCH (n:Node)-[:HAS_FAULT]->(f:Fault) WHERE n.name = 'leaf-104'
+MATCH (n:Node)-[:HAS_FAULT]->(f:Fault)
+WHERE n.name = 'leaf-104'
 RETURN n.name AS node, f.code, f.severity, f.descr AS description, f.cause
 
-EXAMPLE 4 - Anomalies with specific severity in a fabric:
+EXAMPLE 5 - Anomalies with specific severity:
 Question: "List critical anomalies in fabric 'ams-aci'"
 MATCH (f:Fabric)-[:HAS_ANOMALY]->(a:Anomaly)
 WHERE f.name = 'ams-aci' AND a.severity = 'critical'
 RETURN a.name AS anomaly_name, a.severity, a.lastSeen
 
-EXAMPLE 5 - Fabric status overview:
+EXAMPLE 6 - Fabric status overview with counts:
 Question: "What is the status of fabric 'ams-aci'?"
-MATCH (f:Fabric) WHERE f.name = 'ams-aci'
+MATCH (f:Fabric)
+WHERE f.name = 'ams-aci'
 OPTIONAL MATCH (f)-[:HAS_ANOMALY]->(a:Anomaly)
-RETURN f.name AS fabric_name, count(a) AS anomaly_count, collect(a.name) AS anomaly_names, collect(a.severity) AS severities
+RETURN f.name AS fabric_name, count(a) AS anomaly_count,
+       collect(a.name) AS anomaly_names, collect(a.severity) AS severities
 
-EXAMPLE 6 - Tenant with all related entities:
+EXAMPLE 7 - Tenant with all related entities:
 Question: "Tell me about tenant 'example-tenant'"
-MATCH (t:Tenant) WHERE t.name = 'example-tenant'
+MATCH (t:Tenant)
+WHERE t.name = 'example-tenant'
 OPTIONAL MATCH (t)-[:HAS_AP]->(ap:AppProfile)
 OPTIONAL MATCH (ap)-[:HAS_EPG]->(epg:EPG)
 OPTIONAL MATCH (t)-[:HAS_VRF]->(vrf:VRF)
 OPTIONAL MATCH (t)-[:HAS_BD]->(bd:BridgeDomain)
-RETURN t.name AS tenant, collect(DISTINCT ap.name) AS app_profiles, collect(DISTINCT epg.name) AS epgs, collect(DISTINCT vrf.name) AS vrfs, collect(DISTINCT bd.name) AS bridge_domains
+RETURN t.name AS tenant,
+       collect(DISTINCT ap.name) AS app_profiles,
+       collect(DISTINCT epg.name) AS epgs,
+       collect(DISTINCT vrf.name) AS vrfs,
+       collect(DISTINCT bd.name) AS bridge_domains
 
-EXAMPLE 7 - Tenants in a fabric:
+EXAMPLE 8 - Tenants in a fabric:
 Question: "What tenants exist in fabric 'ams-aci'?"
-MATCH (t:Tenant)-[:BELONGS_TO]->(f:Fabric) WHERE f.name = 'ams-aci'
+MATCH (t:Tenant)-[:BELONGS_TO]->(f:Fabric)
+WHERE f.name = 'ams-aci'
 RETURN t.name AS tenant_name
 
-EXAMPLE 8 - Tenants affected by anomalies:
-Question: "Show me tenants with anomalies" or "Which tenants are affected by anomalies?"
+EXAMPLE 9 - Tenants affected by anomalies:
+Question: "Show me tenants with anomalies"
 MATCH (a:Anomaly)-[:AFFECTS]->(t:Tenant)
-RETURN t.name AS tenant_name, collect(a.name) AS anomalies, collect(a.severity) AS severities
+RETURN t.name AS tenant_name,
+       collect(a.name) AS anomalies,
+       collect(a.severity) AS severities
 
-EXAMPLE 9 - Details about a specific anomaly:
-Question: "Tell me about the ENDPOINT_TRAFFIC_SCORE_UNHEALTHY anomaly" or "What tenants are affected by ENDPOINT_TRAFFIC_SCORE_UNHEALTHY?"
-MATCH (a:Anomaly {{name: 'ENDPOINT_TRAFFIC_SCORE_UNHEALTHY'}})
+EXAMPLE 10 - Details about a specific anomaly:
+Question: "Tell me about the ENDPOINT_TRAFFIC_SCORE_UNHEALTHY anomaly"
+MATCH (a:Anomaly {name: 'ENDPOINT_TRAFFIC_SCORE_UNHEALTHY'})
 OPTIONAL MATCH (a)-[:AFFECTS]->(t:Tenant)
 OPTIONAL MATCH (f:Fabric)-[:HAS_ANOMALY]->(a)
-RETURN a.name, a.severity, a.category, a.details, collect(DISTINCT t.name) AS affected_tenants, collect(DISTINCT f.name) AS fabrics
+RETURN a.name, a.severity, a.category, a.details,
+       collect(DISTINCT t.name) AS affected_tenants,
+       collect(DISTINCT f.name) AS fabrics
 
-EXAMPLE 10 - Anomalies affecting a specific tenant:
+EXAMPLE 11 - Anomalies affecting a specific tenant:
 Question: "What anomalies affect the flexpod tenant?"
-MATCH (a:Anomaly)-[:AFFECTS]->(t:Tenant) WHERE t.name = 'flexpod'
+MATCH (a:Anomaly)-[:AFFECTS]->(t:Tenant)
+WHERE t.name = 'flexpod'
 RETURN t.name AS tenant_name, a.name AS anomaly_name, a.severity, a.details
+
+EXAMPLE 12 - Nodes with multiple properties and counts:
+Question: "Show all leaf nodes in fabric 'ams-aci' with their fault counts"
+MATCH (n:Node)-[:BELONGS_TO]->(f:Fabric)
+WHERE f.name = 'ams-aci' AND n.role = 'leaf'
+OPTIONAL MATCH (n)-[:HAS_FAULT]->(fault:Fault)
+RETURN n.name, n.model, n.address, count(fault) AS fault_count
+ORDER BY fault_count DESC
 
 Schema:
 {schema}
@@ -543,6 +599,8 @@ Chat History (use this to understand follow-up questions):
 Current Question: {question}
 
 If the question refers to something from the chat history (like "the tenant mentioned above" or "that application profile"), extract the specific name from the history and use it in your query.
+
+THINK: What entities and relationships do I need? Write MATCH/OPTIONAL MATCH first, then RETURN.
 
 Cypher:"""
 
