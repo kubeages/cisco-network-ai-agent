@@ -837,23 +837,73 @@ async def query_mcp_with_llm(question: str, chat_history: str = "") -> tuple[str
         if not tools:
             return ("No MCP tools available.", [])
 
-        # For now, use a simple heuristic to select tools
-        # TODO: Implement proper LLM-based tool selection
+        # Improved tool selection with LLM assistance
         question_lower = question.lower()
 
-        # Simple keyword-based tool selection
-        selected_tools = []
+        # Keyword-based filtering to narrow down candidates
+        candidate_tools = []
+
         if "health" in question_lower or "status" in question_lower:
-            # Look for health/status related tools
-            selected_tools = [t for t in tools[:10] if "health" in t.lower() or "status" in t.lower()]
+            # Search ALL tools for health/status (not just first 10!)
+            # Prioritize fabric/site health over compliance
+            health_keywords = ["health", "status", "fabric", "site", "device"]
+            for keyword in health_keywords:
+                matches = [t for t in tools if keyword in t.lower() and "compliance" not in t.lower()]
+                candidate_tools.extend(matches)
+                if len(candidate_tools) >= 10:
+                    break
         elif "anomal" in question_lower:
-            selected_tools = [t for t in tools[:10] if "anomal" in t.lower()]
+            candidate_tools = [t for t in tools if "anomal" in t.lower()]
         elif "compliance" in question_lower:
-            selected_tools = [t for t in tools[:10] if "compliance" in t.lower()]
+            candidate_tools = [t for t in tools if "compliance" in t.lower()]
+        elif "bandwidth" in question_lower or "traffic" in question_lower:
+            candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["bandwidth", "traffic", "flow", "interface"])]
+        elif "cpu" in question_lower or "memory" in question_lower:
+            candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["cpu", "memory", "resource", "utilization"])]
+
+        # Remove duplicates while preserving order
+        seen = set()
+        candidate_tools = [t for t in candidate_tools if not (t in seen or seen.add(t))]
+
+        if not candidate_tools:
+            # Fallback: search for any get/list/describe tools
+            candidate_tools = [t for t in tools[:50] if any(prefix in t.lower() for prefix in ["get", "list", "describe"])]
+
+        # Use LLM to select the most relevant tools from candidates
+        if len(candidate_tools) > 5:
+            tool_selection_prompt = f"""You are helping select the most relevant API tools to answer a user's question.
+
+Question: {question}
+
+Available tools (first 20):
+{chr(10).join(f"{i+1}. {t}" for i, t in enumerate(candidate_tools[:20]))}
+
+Select the top 1-3 most relevant tool names (comma-separated) that would best answer this question. Only return the tool names, nothing else.
+
+Selected tools:"""
+
+            selection_response = qa_llm.invoke(tool_selection_prompt)
+            selected_names = selection_response.content if hasattr(selection_response, 'content') else str(selection_response)
+
+            # Parse LLM response to extract tool names
+            selected_tools = []
+            for line in selected_names.split('\n'):
+                for candidate in candidate_tools:
+                    if candidate in line:
+                        selected_tools.append(candidate)
+                        break
+
+            # Fallback if LLM didn't return valid tools
+            if not selected_tools:
+                selected_tools = candidate_tools[:3]
+        else:
+            selected_tools = candidate_tools[:3]
 
         if not selected_tools:
-            # Default to first available tool as fallback
+            # Last resort fallback
             selected_tools = tools[:1]
+
+        print(f"🔧 Selected {len(selected_tools)} MCP tools from {len(candidate_tools)} candidates: {selected_tools[:3]}")
 
         # Execute selected tools
         sources = []
