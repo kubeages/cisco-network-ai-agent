@@ -775,6 +775,111 @@ Follow-up queries:"""
 )
 
 # --- Query Classification and MCP Integration ---
+def get_capability_aware_suggestions(capabilities: dict) -> List[str]:
+    """Generate query suggestions based on available data sources"""
+    suggestions = []
+
+    if capabilities['nd_available']:
+        suggestions.extend([
+            "What is the current health status of the network?",
+            "Show me current anomalies",
+            "List all managed fabrics"
+        ])
+
+    if capabilities['apic_available']:
+        suggestions.extend([
+            "Show me all tenants",
+            "List application profiles"
+        ])
+
+    if capabilities['full_topology']:
+        suggestions.append("Show me the complete network topology")
+
+    # Fallback if no sources available
+    if not suggestions:
+        suggestions = ["Check system status", "List data sources"]
+
+    return suggestions[:3]  # Limit to 3
+
+
+def validate_query_feasibility(question: str, capabilities: dict) -> tuple[bool, str]:
+    """
+    Check if a query can be answered with available data sources.
+    Returns (is_feasible, error_message)
+    """
+    question_lower = question.lower()
+
+    # Check for APIC-specific queries
+    apic_keywords = ['epg', 'endpoint group', 'tenant', 'contract', 'app profile',
+                     'application profile', 'bridge domain', 'vrf']
+
+    needs_apic = any(kw in question_lower for kw in apic_keywords)
+
+    if needs_apic and not capabilities['apic_available']:
+        return False, (
+            "⚠️ This query requires APIC policy model data (EPG/Tenant/Contracts) which is currently unavailable. "
+            "\n\n**Available queries:**\n"
+            "- Network health and status\n"
+            "- Fabric and device information\n"
+            "- Live performance metrics\n"
+            "- Anomalies and compliance\n"
+            "\n💡 Try asking about current health, fabrics, or device status instead."
+        )
+
+    # Check for ND/MCP-specific queries
+    if 'live' in question_lower or 'current' in question_lower or 'health' in question_lower:
+        if not capabilities['nd_available']:
+            return False, (
+                "⚠️ This query requires Nexus Dashboard operational data which is currently unavailable. "
+                "\n\n**Available queries:**\n"
+                "- Network topology (if APIC is available)\n"
+                "- Policy configuration\n"
+                "\n💡 Nexus Dashboard connection is required for live metrics and health data."
+            )
+
+    return True, ""
+
+
+def get_data_source_capabilities():
+    """
+    Check which data sources are available in Neo4j.
+    Returns dict with capability flags.
+    """
+    try:
+        query = """
+        MATCH (ds:DataSource)
+        WHERE ds.available = true
+        RETURN ds.name as source, ds.provides as provides
+        """
+        result = graph.query(query)
+
+        sources = {row['source']: row.get('provides', '') for row in result}
+
+        capabilities = {
+            'apic_available': 'apic' in sources,
+            'nd_available': 'nexus_dashboard' in sources,
+            'policy_model': 'apic' in sources,  # EPG, Tenant, Contracts
+            'live_metrics': 'nexus_dashboard' in sources,  # MCP data
+            'fabric_topology': 'nexus_dashboard' in sources,  # Basic fabric info
+            'full_topology': 'apic' in sources and 'nexus_dashboard' in sources,
+            'sources': sources
+        }
+
+        return capabilities
+    except Exception as e:
+        print(f"⚠️ Failed to check data source capabilities: {e}")
+        # Default to assuming both available (backward compatibility)
+        return {
+            'apic_available': True,
+            'nd_available': True,
+            'policy_model': True,
+            'live_metrics': True,
+            'fabric_topology': True,
+            'full_topology': True,
+            'sources': {}
+        }
+
+
 def classify_query_intent(question: str) -> str:
     """
     Classify query intent to determine data source using keywords + LLM.
@@ -1142,6 +1247,19 @@ async def ask_agent(query: Query):
             security_info.warning = f"⚠️ Security Notice: Potential concerns detected in your question ({prompt_result.severity}): {', '.join(prompt_result.violated_rules)}"
             print(f"⚠️ Prompt warning from AI Defense: {prompt_result.violated_rules}")
 
+    # --- Check Data Source Capabilities ---
+    capabilities = get_data_source_capabilities()
+    is_feasible, error_msg = validate_query_feasibility(query.question, capabilities)
+
+    if not is_feasible:
+        print(f"⚠️ Query not feasible with current data sources: {error_msg}")
+        return Response(
+            answer=error_msg,
+            suggestions=get_capability_aware_suggestions(capabilities),
+            security=security_info,
+            sources=[]
+        )
+
     # --- Query Classification and Routing ---
     query_intent = classify_query_intent(query.question)
     print(f"🔍 Query classified as: {query_intent}")
@@ -1292,6 +1410,15 @@ async def ask_agent_stream(query: Query):
                 security_info["warning"] = warning_msg
                 yield f"data: {json.dumps({'status': 'warning', 'message': f'⚠️ {warning_msg}'})}\n\n"
                 await asyncio.sleep(0.1)
+
+        # --- Check Data Source Capabilities ---
+        capabilities = get_data_source_capabilities()
+        is_feasible, error_msg = validate_query_feasibility(query.question, capabilities)
+
+        if not is_feasible:
+            print(f"⚠️ Query not feasible with current data sources")
+            yield f"data: {json.dumps({'status': 'complete', 'message': '⚠️ Data source limitation', 'answer': error_msg, 'sources': [], 'security': security_info if AI_DEFENSE_ENABLED else None})}\n\n"
+            return
 
         # --- Query Classification and Routing ---
         query_intent = classify_query_intent(query.question)
@@ -1526,6 +1653,56 @@ def get_suggestions(request: SuggestionRequest):
 def health_check():
     """Health check endpoint for readiness/liveness probes"""
     return {"status": "Network AI Agent API is running"}
+
+# --- Data Source Capabilities Endpoint ---
+@app.get("/api/capabilities")
+def get_capabilities():
+    """
+    Return available data sources and query capabilities.
+    Used by frontend to adapt UI and suggestions.
+    """
+    capabilities = get_data_source_capabilities()
+
+    return {
+        "data_sources": {
+            "apic": {
+                "available": capabilities['apic_available'],
+                "provides": "ACI Policy Model (Tenants, EPGs, Contracts, VRFs)",
+                "query_types": ["topology", "policy", "configuration"]
+            },
+            "nexus_dashboard": {
+                "available": capabilities['nd_available'],
+                "provides": "Operational Data (Health, Metrics, Anomalies, Compliance)",
+                "query_types": ["health", "metrics", "anomalies", "compliance"]
+            }
+        },
+        "capabilities": {
+            "policy_queries": capabilities['policy_model'],
+            "live_metrics": capabilities['live_metrics'],
+            "fabric_topology": capabilities['fabric_topology'],
+            "full_topology": capabilities['full_topology']
+        },
+        "suggested_queries": {
+            "always_available": [
+                "List all fabrics",
+                "Show network overview"
+            ],
+            "with_apic": [
+                "Show all tenants",
+                "List EPGs in tenant X",
+                "Show application profiles"
+            ] if capabilities['apic_available'] else [],
+            "with_nd": [
+                "What is the current health status?",
+                "Show me anomalies",
+                "Check compliance status"
+            ] if capabilities['nd_available'] else []
+        },
+        "mode": "full" if capabilities['full_topology']
+                else ("apic_only" if capabilities['apic_available']
+                else ("nd_only" if capabilities['nd_available']
+                else "degraded"))
+    }
 
 # --- AI Defense Status Endpoint ---
 @app.get("/ai-defense/status")

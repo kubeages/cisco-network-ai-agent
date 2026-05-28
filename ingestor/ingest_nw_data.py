@@ -185,6 +185,46 @@ APIC_FABRIC_NAME = os.getenv("APIC_FABRIC_NAME", "")
 
 requests.urllib3.disable_warnings()
 
+def mark_data_source_availability(driver, apic_available, nd_available):
+    """
+    Create/update DataSource nodes in Neo4j to track availability.
+    This allows the backend to adapt queries based on available data.
+    """
+    with driver.session() as session:
+        timestamp = datetime.now(timezone.utc)
+
+        # Mark APIC availability
+        session.run("""
+            MERGE (ds:DataSource {name: 'apic'})
+            SET ds.available = $available,
+                ds.last_check = $timestamp,
+                ds.description = $description,
+                ds.provides = $provides
+        """,
+        available=apic_available,
+        timestamp=timestamp,
+        description="Cisco APIC - ACI Policy Model",
+        provides="Tenants, EPGs, Contracts, Bridge Domains, VRFs"
+        )
+
+        # Mark ND availability
+        session.run("""
+            MERGE (ds:DataSource {name: 'nexus_dashboard'})
+            SET ds.available = $available,
+                ds.last_check = $timestamp,
+                ds.description = $description,
+                ds.provides = $provides
+        """,
+        available=nd_available,
+        timestamp=timestamp,
+        description="Cisco Nexus Dashboard - Operations & Monitoring",
+        provides="Fabrics, Anomalies, Health Metrics, Compliance"
+        )
+
+        print(f"  - APIC: {'✅ Available' if apic_available else '❌ Unavailable'}")
+        print(f"  - Nexus Dashboard: {'✅ Available' if nd_available else '❌ Unavailable'}")
+
+
 def run_ingestion_job():
     """
     Main function that runs a full data ingestion cycle
@@ -211,51 +251,98 @@ def run_ingestion_job():
 
 
 def _execute_ingestion(parent_span):
-    """Internal function to execute the ingestion with optional tracing."""
+    """
+    Adaptive ingestion - handles missing data sources gracefully.
+    Marks data source availability in Neo4j for backend awareness.
+    """
+    # Track which sources are available
+    apic_available = False
+    nd_available = False
+
     try:
         neo4j_driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
         neo4j_driver.verify_connectivity()
 
-        # Process APIC data
+        # === APIC Data (Policy Model) ===
         apic_start = time.time()
-        apic_session = get_apic_session(APIC_URL, APIC_USER, APIC_PASSWORD)
-        if apic_session:
-            if ingestor_tracer:
-                with ingestor_tracer.start_as_current_span(
-                    "process_apic_data",
-                    kind=SpanKind.INTERNAL,
-                    attributes={"data.source": "apic", "apic.url": APIC_URL}
-                ):
+        print("\n📋 Attempting APIC connection...")
+        try:
+            apic_session = get_apic_session(APIC_URL, APIC_USER, APIC_PASSWORD)
+            if apic_session:
+                if ingestor_tracer:
+                    with ingestor_tracer.start_as_current_span(
+                        "process_apic_data",
+                        kind=SpanKind.INTERNAL,
+                        attributes={"data.source": "apic", "apic.url": APIC_URL}
+                    ):
+                        process_apic_data(neo4j_driver, apic_session, APIC_URL)
+                else:
                     process_apic_data(neo4j_driver, apic_session, APIC_URL)
+
+                if METRICS_ENABLED:
+                    SYNC_DURATION.labels(source="apic").observe(time.time() - apic_start)
+                    LAST_SYNC_SUCCESS.labels(source="apic").set(time.time())
+                    SYNC_STATUS.labels(source="apic").set(1)
+
+                apic_available = True
+                print("✅ APIC data successfully ingested")
             else:
-                process_apic_data(neo4j_driver, apic_session, APIC_URL)
-
+                print("⚠️  APIC connection failed - continuing without policy model data")
+        except Exception as e:
+            print(f"⚠️  APIC processing failed: {e}")
+            print("   Continuing with Nexus Dashboard only...")
             if METRICS_ENABLED:
-                SYNC_DURATION.labels(source="apic").observe(time.time() - apic_start)
-                LAST_SYNC_SUCCESS.labels(source="apic").set(time.time())
-                SYNC_STATUS.labels(source="apic").set(1)
+                SYNC_ERRORS.labels(source="apic", error_type=type(e).__name__).inc()
+                SYNC_STATUS.labels(source="apic").set(0)
 
-        # Process Nexus Dashboard data
+        # === Nexus Dashboard Data (Operational/Fabric Data) ===
         nd_start = time.time()
-        nd_token = get_nexus_token(ND_URL, ND_USER, ND_PASSWORD)
-        if nd_token:
-            if ingestor_tracer:
-                with ingestor_tracer.start_as_current_span(
-                    "process_nexus_dashboard_data",
-                    kind=SpanKind.INTERNAL,
-                    attributes={"data.source": "nexus_dashboard", "nd.url": ND_URL}
-                ):
+        print("\n📡 Attempting Nexus Dashboard connection...")
+        try:
+            nd_token = get_nexus_token(ND_URL, ND_USER, ND_PASSWORD)
+            if nd_token:
+                if ingestor_tracer:
+                    with ingestor_tracer.start_as_current_span(
+                        "process_nexus_dashboard_data",
+                        kind=SpanKind.INTERNAL,
+                        attributes={"data.source": "nexus_dashboard", "nd.url": ND_URL}
+                    ):
+                        process_nexus_dashboard_data(neo4j_driver, nd_token, ND_URL)
+                else:
                     process_nexus_dashboard_data(neo4j_driver, nd_token, ND_URL)
-            else:
-                process_nexus_dashboard_data(neo4j_driver, nd_token, ND_URL)
 
+                if METRICS_ENABLED:
+                    SYNC_DURATION.labels(source="nexus_dashboard").observe(time.time() - nd_start)
+                    LAST_SYNC_SUCCESS.labels(source="nexus_dashboard").set(time.time())
+                    SYNC_STATUS.labels(source="nexus_dashboard").set(1)
+
+                nd_available = True
+                print("✅ Nexus Dashboard data successfully ingested")
+            else:
+                print("⚠️  Nexus Dashboard connection failed - no operational data available")
+        except Exception as e:
+            print(f"⚠️  Nexus Dashboard processing failed: {e}")
             if METRICS_ENABLED:
-                SYNC_DURATION.labels(source="nexus_dashboard").observe(time.time() - nd_start)
-                LAST_SYNC_SUCCESS.labels(source="nexus_dashboard").set(time.time())
-                SYNC_STATUS.labels(source="nexus_dashboard").set(1)
+                SYNC_ERRORS.labels(source="nexus_dashboard", error_type=type(e).__name__).inc()
+                SYNC_STATUS.labels(source="nexus_dashboard").set(0)
+
+        # === Mark Data Source Availability in Neo4j ===
+        print("\n📊 Updating data source availability...")
+        mark_data_source_availability(neo4j_driver, apic_available, nd_available)
 
         neo4j_driver.close()
-        print(f"\n✅ === INGESTION TASK COMPLETED: {datetime.now()} === ✅")
+
+        # Determine completion status
+        if apic_available and nd_available:
+            print(f"\n✅ === FULL INGESTION COMPLETED (APIC + ND): {datetime.now()} === ✅")
+        elif nd_available:
+            print(f"\n✅ === PARTIAL INGESTION COMPLETED (ND ONLY): {datetime.now()} === ✅")
+            print("   Note: APIC unavailable - no policy model (EPG/Tenant) data")
+        elif apic_available:
+            print(f"\n✅ === PARTIAL INGESTION COMPLETED (APIC ONLY): {datetime.now()} === ✅")
+            print("   Note: ND unavailable - no operational/fabric data")
+        else:
+            print(f"\n❌ === INGESTION FAILED: No data sources available === ❌")
 
         if parent_span:
             parent_span.set_status(Status(StatusCode.OK))

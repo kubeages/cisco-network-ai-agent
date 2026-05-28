@@ -62,6 +62,7 @@ else:
     print("🔭 Splunk Observability disabled (set SPLUNK_OBSERVABILITY_ENABLED=true to enable)")
 
 BACKEND_URL = "http://backend-api:8000/ask"
+BACKEND_CAPABILITIES_URL = "http://backend-api:8000/api/capabilities"
 BACKEND_STREAM_URL = "http://backend-api:8000/ask/stream"
 SUGGESTIONS_URL = "http://backend-api:8000/suggestions"
 GRAPH_URL = "http://backend-api:8000/api/graph"
@@ -124,6 +125,53 @@ NODE_QUERY_TEMPLATES = {
     "Advisory": "Tell me about this advisory: '{name}'. What type is it (PSIRT, EOL, Field Notice)? How many devices are affected and what action should I take?",
     "Unknown": "Tell me about '{name}'."
 }
+
+def fetch_capabilities():
+    """Fetch data source capabilities from backend"""
+    try:
+        response = requests.get(BACKEND_CAPABILITIES_URL, timeout=5)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching capabilities: {e}")
+        return None
+
+def format_capabilities_status():
+    """Format capabilities as HTML status indicator"""
+    caps = fetch_capabilities()
+    if not caps:
+        return '<div class="status-indicator">⚠️ <span>Unable to check data sources</span></div>'
+
+    mode = caps.get('mode', 'unknown')
+    apic = caps['data_sources']['apic']['available']
+    nd = caps['data_sources']['nexus_dashboard']['available']
+
+    if mode == 'full':
+        status_icon = '✅'
+        status_text = 'All Systems Operational'
+        status_class = 'status-ok'
+    elif mode == 'nd_only':
+        status_icon = '🟡'
+        status_text = 'Limited Mode (ND Only - No Policy Data)'
+        status_class = 'status-partial'
+    elif mode == 'apic_only':
+        status_icon = '🟡'
+        status_text = 'Limited Mode (APIC Only - No Live Metrics)'
+        status_class = 'status-partial'
+    else:
+        status_icon = '❌'
+        status_text = 'Degraded Mode'
+        status_class = 'status-error'
+
+    return f'''
+    <div class="status-indicator {status_class}">
+        <span class="status-icon">{status_icon}</span>
+        <span class="status-text">{status_text}</span>
+        <span class="status-details">
+            {"🟢" if apic else "🔴"} APIC | {"🟢" if nd else "🔴"} ND
+        </span>
+    </div>
+    '''
 
 def fetch_graph_data():
     """Fetch graph data from the backend API"""
@@ -1265,6 +1313,41 @@ footer {
     font-weight: 400;
 }
 
+/* === DATA SOURCE STATUS INDICATOR === */
+.status-indicator {
+    position: absolute;
+    top: 60px;
+    right: 20px;
+    z-index: 1001;
+    background: rgba(13, 17, 23, 0.85);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(0, 212, 255, 0.2);
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-size: 12px;
+    color: #c9d1d9;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+.status-icon {
+    font-size: 16px;
+}
+.status-text {
+    font-weight: 500;
+}
+.status-details {
+    font-size: 11px;
+    color: #8b949e;
+    margin-left: 8px;
+    padding-left: 8px;
+    border-left: 1px solid rgba(139, 148, 158, 0.3);
+}
+.status-ok { border-color: rgba(46, 204, 113, 0.3); }
+.status-partial { border-color: rgba(255, 193, 7, 0.3); }
+.status-error { border-color: rgba(220, 53, 69, 0.3); }
+
 /* === GLASSMORPHIC CHAT PANEL (draggable + resizable) === */
 #chat-panel {
     pointer-events: auto !important;
@@ -2065,6 +2148,13 @@ with gr.Blocks(theme=gr.themes.Base(), title="Network AI Agent", css=custom_css,
                 </button>
             </div>""",
             elem_id="header-bar"
+        )
+
+        # Data Source Status Indicator
+        gr.HTML(
+            value=format_capabilities_status,
+            elem_id="status-indicator-container",
+            every=30  # Refresh every 30 seconds
         )
 
         # Glassmorphic chat panel (left sidebar, draggable + resizable)
