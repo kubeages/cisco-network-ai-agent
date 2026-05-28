@@ -898,24 +898,37 @@ suggestion_prompt = PromptTemplate.from_template(
 
 CRITICAL: PRESERVE CONTEXT! If the question mentions a specific tenant, fabric, node, or other entity, INCLUDE that context in your suggestions.
 
+CRITICAL: RESPECT ENTITY TYPES! Do NOT confuse different entity types:
+- Tenants (e.g., 'edge', 'vxlan_stretch', 'infra') → belong to Tenants and contain AppProfiles, EPGs, VRFs, BridgeDomains
+- Fabrics (e.g., 'ams-aci', 'fabric1') → contain Nodes (spine/leaf switches)
+- Nodes (e.g., 'leaf-101', 'spine-201') → are part of Fabrics, not Tenants
+- AppProfiles, EPGs, VRFs, BridgeDomains → belong to Tenants, not Fabrics
+
+Entity type validation:
+1. If answer mentions "tenant 'X'" or "Tenant: X", ONLY use X in tenant-related suggestions (AppProfiles, EPGs, VRFs, BridgeDomains)
+2. If answer mentions "fabric 'Y'", ONLY use Y in fabric-related suggestions (nodes, topology)
+3. NEVER suggest "nodes in tenant X" or "EPGs in fabric Y" - these are invalid combinations
+
 IMPORTANT: Write each suggestion as a direct command or question that will be sent to the AI, NOT as a question asking the user what they want.
 
-Good examples (notice how context is preserved):
+Good examples (notice correct entity usage):
 - Question about tenant 'edge' → "Show EPGs in AppProfile 'network-segments' under tenant 'edge'"
 - Question about fabric 'ams-aci' → "Show all nodes in fabric 'ams-aci'"
 - Question about node 'leaf-102' → "What faults affect node 'leaf-102'?"
+- Answer shows tenant 'vxlan_stretch' → "Show AppProfiles in tenant 'vxlan_stretch'" (NOT "nodes in fabric 'vxlan_stretch'")
 - General question → "List all tenants" (no specific context to preserve)
 
 Bad examples (do NOT use these formats):
 - "Do you want me to list the EPGs?" (asking user, not direct query)
 - "Should I check the anomalies?" (asking user, not direct query)
-- "Show details of AppProfile 'X'" (missing tenant context if tenant was mentioned in question)
+- "Show details of AppProfile 'X'" (missing tenant context if tenant was mentioned)
+- "List all nodes in fabric 'vxlan_stretch'" when vxlan_stretch is a tenant (wrong entity type!)
 
 Context preservation rules:
 1. If question mentions "tenant 'X'", include "in tenant 'X'" or "under tenant 'X'" in suggestions
 2. If question mentions "fabric 'Y'", include "in fabric 'Y'" in suggestions
 3. If question mentions "node 'Z'", include references to that specific node
-4. If answer mentions specific names (tenants, fabrics, AppProfiles), use those in suggestions
+4. If answer mentions specific names, identify their entity type from the answer first, then use appropriately
 
 The network graph has the following schema: {schema}
 
