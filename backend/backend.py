@@ -502,7 +502,7 @@ Common Subnet properties: ip, scope, bd, tenant
 
 EXAMPLE 1 - Node details with fabric and faults:
 Question: "Show me details about node 'leaf-102' including its role, model, and any faults"
-MATCH (n:Node {name: 'leaf-102'})-[:BELONGS_TO]->(f:Fabric)
+MATCH (n:Node {{name: 'leaf-102'}})-[:BELONGS_TO]->(f:Fabric)
 OPTIONAL MATCH (n)-[:HAS_FAULT]->(fault:Fault)
 RETURN n.name, n.role, n.model, n.address, n.serial, f.name AS fabric_name,
        fault.code AS fault_code, fault.severity AS fault_severity, fault.descr AS fault_description
@@ -571,7 +571,7 @@ RETURN t.name AS tenant_name,
 
 EXAMPLE 10 - Details about a specific anomaly:
 Question: "Tell me about the ENDPOINT_TRAFFIC_SCORE_UNHEALTHY anomaly"
-MATCH (a:Anomaly {name: 'ENDPOINT_TRAFFIC_SCORE_UNHEALTHY'})
+MATCH (a:Anomaly {{name: 'ENDPOINT_TRAFFIC_SCORE_UNHEALTHY'}})
 OPTIONAL MATCH (a)-[:AFFECTS]->(t:Tenant)
 OPTIONAL MATCH (f:Fabric)-[:HAS_ANOMALY]->(a)
 RETURN a.name, a.severity, a.category, a.details,
@@ -594,12 +594,12 @@ ORDER BY fault_count DESC
 
 EXAMPLE 13 - Subnets under a BridgeDomain:
 Question: "Show all subnets under BridgeDomain 'inb'"
-MATCH (bd:BridgeDomain {name: 'inb'})-[:HAS_SUBNET]->(s:Subnet)
+MATCH (bd:BridgeDomain {{name: 'inb'}})-[:HAS_SUBNET]->(s:Subnet)
 RETURN s.ip AS subnet_ip, s.scope AS scope
 
 EXAMPLE 14 - BridgeDomain with all details including subnets:
 Question: "Describe BridgeDomain 'inb' with all its subnets"
-MATCH (bd:BridgeDomain {name: 'inb'})
+MATCH (bd:BridgeDomain {{name: 'inb'}})
 OPTIONAL MATCH (bd)-[:HAS_SUBNET]->(s:Subnet)
 OPTIONAL MATCH (t:Tenant)-[:HAS_BD]->(bd)
 RETURN bd.name AS bridge_domain, t.name AS tenant,
