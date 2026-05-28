@@ -909,45 +909,75 @@ Selected tools:"""
         sources = []
         results = []
 
-        for tool_name in selected_tools[:3]:  # Limit to 3 tools max
+        # Discover available fabrics from Neo4j if tools need fabricName
+        fabric_names = []
+        tools_need_fabric = any("fabric" in t.lower() or "resource" in t.lower() or "device" in t.lower()
+                                for t in selected_tools[:3])
+
+        if tools_need_fabric:
             try:
-                # Build arguments for the tool
-                tool_args = {}
-
-                # Common parameters that many tools need
-                tool_lower = tool_name.lower()
-
-                # Add fabricName if tool seems to need it
-                if "fabric" in tool_lower or "resource" in tool_lower or "device" in tool_lower:
-                    # Use the configured fabric name from environment
-                    fabric_name = os.getenv("APIC_FABRIC_NAME", "")
-                    if fabric_name:
-                        tool_args["fabricName"] = fabric_name
-
-                # Add siteGroupName if asking about sites
-                if "site" in question_lower and "sitegroup" in tool_lower:
-                    # Could extract from question with LLM, for now use a default or empty
-                    pass
-
-                # Log the call with arguments
-                print(f"🔧 Calling {tool_name} with args: {tool_args}")
-
-                result = await mcp.call_tool(tool_name, tool_args)
-
-                # Extract text from MCP response
-                content = result.get("content", [])
-                if content and len(content) > 0:
-                    text = content[0].get("text", "")
-                    results.append(f"Tool: {tool_name}\nResult: {text}")
-
-                    sources.append(DataSource(
-                        type="mcp",
-                        description=f"Real-time data from {tool_name}",
-                        details={"tool": tool_name, "arguments": tool_args}
-                    ))
+                fabric_query = "MATCH (f:Fabric) RETURN f.name AS fabric"
+                fabric_result = graph.query(fabric_query)
+                fabric_names = [row['fabric'] for row in fabric_result if row.get('fabric')]
+                print(f"📊 Discovered {len(fabric_names)} fabrics from Neo4j: {fabric_names}")
             except Exception as e:
-                print(f"⚠️ Failed to execute tool {tool_name}: {e}")
-                continue
+                print(f"⚠️ Failed to query fabrics from Neo4j: {e}")
+                # Fallback to environment variable
+                default_fabric = os.getenv("APIC_FABRIC_NAME", "")
+                if default_fabric:
+                    fabric_names = [default_fabric]
+
+        for tool_name in selected_tools[:3]:  # Limit to 3 tools max
+            tool_lower = tool_name.lower()
+
+            # Determine if this tool needs fabric parameter
+            needs_fabric = "fabric" in tool_lower or "resource" in tool_lower or "device" in tool_lower
+
+            if needs_fabric and fabric_names:
+                # Call tool for each fabric and aggregate results
+                for fabric_name in fabric_names:
+                    try:
+                        tool_args = {"fabricName": fabric_name}
+                        print(f"🔧 Calling {tool_name} with args: {tool_args}")
+
+                        result = await mcp.call_tool(tool_name, tool_args)
+
+                        # Extract text from MCP response
+                        content = result.get("content", [])
+                        if content and len(content) > 0:
+                            text = content[0].get("text", "")
+                            results.append(f"Fabric: {fabric_name}\nTool: {tool_name}\nResult: {text}")
+
+                            sources.append(DataSource(
+                                type="mcp",
+                                description=f"Real-time data from {tool_name} (fabric: {fabric_name})",
+                                details={"tool": tool_name, "arguments": tool_args, "fabric": fabric_name}
+                            ))
+                    except Exception as e:
+                        print(f"⚠️ Failed to execute {tool_name} for fabric {fabric_name}: {e}")
+                        continue
+            else:
+                # Tool doesn't need fabric parameter, call once
+                try:
+                    tool_args = {}
+                    print(f"🔧 Calling {tool_name} with args: {tool_args}")
+
+                    result = await mcp.call_tool(tool_name, tool_args)
+
+                    # Extract text from MCP response
+                    content = result.get("content", [])
+                    if content and len(content) > 0:
+                        text = content[0].get("text", "")
+                        results.append(f"Tool: {tool_name}\nResult: {text}")
+
+                        sources.append(DataSource(
+                            type="mcp",
+                            description=f"Real-time data from {tool_name}",
+                            details={"tool": tool_name, "arguments": tool_args}
+                        ))
+                except Exception as e:
+                    print(f"⚠️ Failed to execute tool {tool_name}: {e}")
+                    continue
 
         if results:
             # Synthesize answer from tool results
