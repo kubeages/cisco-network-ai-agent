@@ -1307,14 +1307,26 @@ async def ask_agent_stream(query: Query):
                 yield f"data: {json.dumps({'status': 'routing', 'message': '🔌 Routing to MCP for live data...'})}\n\n"
                 await asyncio.sleep(0.1)
 
+                yield f"data: {json.dumps({'status': 'fetching', 'message': '📡 Fetching real-time data from Nexus Dashboard...'})}\n\n"
+                await asyncio.sleep(0.1)
+
                 answer, data_sources = await query_mcp_with_llm(query.question, history_str)
+
+                yield f"data: {json.dumps({'status': 'synthesizing', 'message': '🤖 Generating response...'})}\n\n"
+                await asyncio.sleep(0.1)
 
             elif query_intent == "hybrid":
                 # Hybrid query (Neo4j + MCP)
                 yield f"data: {json.dumps({'status': 'routing', 'message': '🔄 Fetching topology and live data...'})}\n\n"
                 await asyncio.sleep(0.1)
 
+                yield f"data: {json.dumps({'status': 'discovering', 'message': '📊 Discovering fabrics and resources...'})}\n\n"
+                await asyncio.sleep(0.1)
+
                 answer, data_sources = await query_hybrid(query.question, history_str)
+
+                yield f"data: {json.dumps({'status': 'synthesizing', 'message': '🤖 Aggregating data from multiple sources...'})}\n\n"
+                await asyncio.sleep(0.1)
 
             else:
                 # Neo4j-only query (topology/relationships)
