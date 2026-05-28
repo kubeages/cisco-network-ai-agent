@@ -1149,98 +1149,132 @@ async def ask_agent_stream(query: Query):
                 yield f"data: {json.dumps({'status': 'warning', 'message': f'⚠️ {warning_msg}'})}\n\n"
                 await asyncio.sleep(0.1)
 
+        # --- Query Classification and Routing ---
+        query_intent = classify_query_intent(query.question)
+        print(f"🔍 Query classified as: {query_intent} (streaming mode)")
+
+        data_sources = []
+        answer = ""
+
         try:
-            # Step 1: Generate Cypher
-            yield f"data: {json.dumps({'status': 'generating', 'message': '📝 Generating database query...'})}\n\n"
-            await asyncio.sleep(0.1)
+            # Route based on query intent
+            if query_intent == "mcp":
+                # MCP-only query (live data)
+                yield f"data: {json.dumps({'status': 'routing', 'message': '🔌 Routing to MCP for live data...'})}\n\n"
+                await asyncio.sleep(0.1)
 
-            cypher_chain = CYPHER_PROMPT | cypher_llm
-            cypher_response = cypher_chain.invoke({
-                "schema": graph.get_schema,
-                "question": query.question,
-                "chat_history": history_str
-            })
-            raw_cypher = cypher_response.content if hasattr(cypher_response, 'content') else str(cypher_response)
-            clean_cypher = clean_cypher_output(raw_cypher)
+                answer, data_sources = await query_mcp_with_llm(query.question, history_str)
 
-            if not clean_cypher or not clean_cypher.strip().upper().startswith(('MATCH', 'OPTIONAL', 'WITH', 'CALL', 'RETURN')):
-                raise ValueError("Generated text does not appear to be a valid Cypher query")
+            elif query_intent == "hybrid":
+                # Hybrid query (Neo4j + MCP)
+                yield f"data: {json.dumps({'status': 'routing', 'message': '🔄 Fetching topology and live data...'})}\n\n"
+                await asyncio.sleep(0.1)
 
-            # Step 2: Execute query
-            yield f"data: {json.dumps({'status': 'querying', 'message': '🔎 Querying the knowledge graph...'})}\n\n"
-            await asyncio.sleep(0.1)
+                answer, data_sources = await query_hybrid(query.question, history_str)
 
-            query_result = traced_neo4j_query(graph, clean_cypher, "neo4j.cypher.user_query")
-            result_count = len(query_result)
-
-            yield f"data: {json.dumps({'status': 'processing', 'message': f'📊 Found {result_count} results, generating response...'})}\n\n"
-            await asyncio.sleep(0.1)
-
-            # Step 3: Generate answer with streaming to track section progress
-            # Choose template based on query source or if it's an anomaly query
-            is_graph_click = query.source == "graph_click"
-            is_anomaly = is_anomaly_query(query.question)
-
-            if is_graph_click or is_anomaly:
-                qa_template = QA_TEMPLATE_DETAILED
-                response_msg = '💡 Generating detailed report...' if is_graph_click else '💡 Generating anomaly report with recommended actions...'
-                # Sections for detailed template
-                sections_to_track = [
-                    ("## Entity Summary", "📋 Generating Entity Summary..."),
-                    ("## Issues Detected", "⚠️ Analyzing Issues Detected..."),
-                    ("## Recommended Actions", "🔧 Preparing Recommended Actions..."),
-                    ("## Additional Context", "📚 Adding Additional Context..."),
-                ]
             else:
-                qa_template = QA_TEMPLATE_CONCISE
-                response_msg = '💡 Generating response...'
-                # Sections for concise template
-                sections_to_track = [
-                    ("## Results", "📊 Presenting Results..."),
-                    ("## Recommended Actions", "🔧 Adding Recommendations..."),
-                ]
+                # Neo4j-only query (topology/relationships)
+                yield f"data: {json.dumps({'status': 'routing', 'message': '📊 Querying network topology...'})}\n\n"
+                await asyncio.sleep(0.1)
 
-            yield f"data: {json.dumps({'status': 'responding', 'message': response_msg})}\n\n"
-            await asyncio.sleep(0.1)
+                # Step 1: Generate Cypher
+                yield f"data: {json.dumps({'status': 'generating', 'message': '📝 Generating database query...'})}\n\n"
+                await asyncio.sleep(0.1)
 
-            # Create streaming QA LLM for section progress
-            streaming_kwargs = {
-                "http_client": httpx.Client(verify=False),
-                "http_async_client": httpx.AsyncClient(verify=False),
-                "model_name": local_model_name if LOCAL_LLM_URL else "gpt-4o-mini",
-                "temperature": 0,
-                "streaming": True,
-            }
-            if LOCAL_LLM_URL:
-                streaming_kwargs["base_url"] = LOCAL_LLM_URL
-                streaming_kwargs["api_key"] = LOCAL_LLM_TOKEN if LOCAL_LLM_TOKEN else "EMPTY"
-            streaming_qa_llm = ChatOpenAI(**streaming_kwargs)
+                cypher_chain = CYPHER_PROMPT | cypher_llm
+                cypher_response = cypher_chain.invoke({
+                    "schema": graph.get_schema,
+                    "question": query.question,
+                    "chat_history": history_str
+                })
+                raw_cypher = cypher_response.content if hasattr(cypher_response, 'content') else str(cypher_response)
+                clean_cypher = clean_cypher_output(raw_cypher)
 
-            qa_prompt = PromptTemplate.from_template(qa_template)
-            qa_chain = qa_prompt | streaming_qa_llm
+                if not clean_cypher or not clean_cypher.strip().upper().startswith(('MATCH', 'OPTIONAL', 'WITH', 'CALL', 'RETURN')):
+                    raise ValueError("Generated text does not appear to be a valid Cypher query")
 
-            # Track which sections we've seen
-            detected_sections = set()
-            answer_chunks = []
-            current_buffer = ""
+                # Step 2: Execute query
+                yield f"data: {json.dumps({'status': 'querying', 'message': '🔎 Querying the knowledge graph...'})}\n\n"
+                await asyncio.sleep(0.1)
 
-            # Stream the QA response
-            async for chunk in qa_chain.astream({
-                "context": str(query_result),
-                "question": query.question
-            }):
-                chunk_text = chunk.content if hasattr(chunk, 'content') else str(chunk)
-                answer_chunks.append(chunk_text)
-                current_buffer += chunk_text
+                query_result = traced_neo4j_query(graph, clean_cypher, "neo4j.cypher.user_query")
+                result_count = len(query_result)
 
-                # Check for section headers in the accumulated buffer
-                for section_marker, section_message in sections_to_track:
-                    if section_marker in current_buffer and section_marker not in detected_sections:
-                        detected_sections.add(section_marker)
-                        yield f"data: {json.dumps({'status': 'section', 'message': section_message})}\n\n"
-                        await asyncio.sleep(0.05)
+                yield f"data: {json.dumps({'status': 'processing', 'message': f'📊 Found {result_count} results, generating response...'})}\n\n"
+                await asyncio.sleep(0.1)
 
-            answer = "".join(answer_chunks)
+                # Step 3: Generate answer with streaming to track section progress
+                # Choose template based on query source or if it's an anomaly query
+                is_graph_click = query.source == "graph_click"
+                is_anomaly = is_anomaly_query(query.question)
+
+                if is_graph_click or is_anomaly:
+                    qa_template = QA_TEMPLATE_DETAILED
+                    response_msg = '💡 Generating detailed report...' if is_graph_click else '💡 Generating anomaly report with recommended actions...'
+                    # Sections for detailed template
+                    sections_to_track = [
+                        ("## Entity Summary", "📋 Generating Entity Summary..."),
+                        ("## Issues Detected", "⚠️ Analyzing Issues Detected..."),
+                        ("## Recommended Actions", "🔧 Preparing Recommended Actions..."),
+                        ("## Additional Context", "📚 Adding Additional Context..."),
+                    ]
+                else:
+                    qa_template = QA_TEMPLATE_CONCISE
+                    response_msg = '💡 Generating response...'
+                    # Sections for concise template
+                    sections_to_track = [
+                        ("## Results", "📊 Presenting Results..."),
+                        ("## Recommended Actions", "🔧 Adding Recommendations..."),
+                    ]
+
+                yield f"data: {json.dumps({'status': 'responding', 'message': response_msg})}\n\n"
+                await asyncio.sleep(0.1)
+
+                # Create streaming QA LLM for section progress
+                streaming_kwargs = {
+                    "http_client": httpx.Client(verify=False),
+                    "http_async_client": httpx.AsyncClient(verify=False),
+                    "model_name": local_model_name if LOCAL_LLM_URL else "gpt-4o-mini",
+                    "temperature": 0,
+                    "streaming": True,
+                }
+                if LOCAL_LLM_URL:
+                    streaming_kwargs["base_url"] = LOCAL_LLM_URL
+                    streaming_kwargs["api_key"] = LOCAL_LLM_TOKEN if LOCAL_LLM_TOKEN else "EMPTY"
+                streaming_qa_llm = ChatOpenAI(**streaming_kwargs)
+
+                qa_prompt = PromptTemplate.from_template(qa_template)
+                qa_chain = qa_prompt | streaming_qa_llm
+
+                # Track which sections we've seen
+                detected_sections = set()
+                answer_chunks = []
+                current_buffer = ""
+
+                # Stream the QA response
+                async for chunk in qa_chain.astream({
+                    "context": str(query_result),
+                    "question": query.question
+                }):
+                    chunk_text = chunk.content if hasattr(chunk, 'content') else str(chunk)
+                    answer_chunks.append(chunk_text)
+                    current_buffer += chunk_text
+
+                    # Check for section headers in the accumulated buffer
+                    for section_marker, section_message in sections_to_track:
+                        if section_marker in current_buffer and section_marker not in detected_sections:
+                            detected_sections.add(section_marker)
+                            yield f"data: {json.dumps({'status': 'section', 'message': section_message})}\n\n"
+                            await asyncio.sleep(0.05)
+
+                answer = "".join(answer_chunks)
+
+                # Track Neo4j source
+                data_sources.append(DataSource(
+                    type="neo4j",
+                    description="Network topology and knowledge graph",
+                    details={"query": clean_cypher, "result_count": result_count}
+                ))
 
             # --- Cisco AI Defense: Inspect LLM response ---
             if AI_DEFENSE_ENABLED and AI_DEFENSE_INSPECT_RESPONSES:
@@ -1277,13 +1311,8 @@ async def ask_agent_stream(query: Query):
         if AI_DEFENSE_ENABLED:
             final_response['security'] = security_info
 
-        # TODO: Implement full query routing (neo4j/mcp/hybrid) in streaming mode
-        # For now, add Neo4j source since streaming currently only uses Neo4j
-        final_response['sources'] = [{
-            "type": "neo4j",
-            "description": "Network topology and knowledge graph",
-            "details": {}
-        }]
+        # Add data sources based on query routing (neo4j/mcp/hybrid)
+        final_response['sources'] = [source.dict() for source in data_sources]
 
         yield f"data: {json.dumps(final_response)}\n\n"
 
