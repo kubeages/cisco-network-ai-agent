@@ -918,6 +918,7 @@ Good examples (notice correct entity usage):
 - Question about fabric 'ams-aci' → "Show all nodes in fabric 'ams-aci'"
 - Question about node 'leaf-102' → "What faults affect node 'leaf-102'?"
 - Answer shows tenant 'vxlan_stretch' → "Show AppProfiles in tenant 'vxlan_stretch'" (NOT "nodes in fabric 'vxlan_stretch'")
+- Question about tenant 'infraservices' showing anomaly 'BD_WITH_SUBNET...' → "What is the status of anomaly 'BD_WITH_SUBNET...' in tenant 'infraservices'" (NOT just "What is the status of anomaly 'BD_WITH_SUBNET...'")
 - General question → "List all tenants" (no specific context to preserve)
 
 Bad examples (do NOT use these formats):
@@ -931,6 +932,10 @@ Context preservation rules:
 2. If question mentions "fabric 'Y'", include "in fabric 'Y'" in suggestions
 3. If question mentions "node 'Z'", include references to that specific node
 4. If answer mentions specific names, identify their entity type from the answer first, then use appropriately
+5. CRITICAL: If answer lists anomalies/faults in response to a question about a specific tenant/fabric/node, the anomaly suggestions MUST preserve that scope:
+   - Question about tenant 'X' showing anomaly 'A' → suggest "What is the status of anomaly 'A' in tenant 'X'"
+   - Question about fabric 'Y' showing fault 'F' → suggest "Tell me about fault 'F' in fabric 'Y'"
+   - Question about node 'Z' showing fault 'F' → suggest "What is fault 'F' affecting node 'Z'"
 
 The network graph has the following schema: {schema}
 
