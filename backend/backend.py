@@ -2096,7 +2096,13 @@ def get_graph_data():
             source_labels = record["source_labels"] or []
             source_props = sanitize_properties(record["source_props"] or {})
             node_type = source_labels[0] if source_labels else "Unknown"
-            node_label = source_props.get("name", source_props.get("dn", f"Node-{source_id}"))
+
+            # Special handling for nodes without 'name' property
+            if node_type == "Subnet":
+                # Subnets use 'ip' property for display
+                node_label = source_props.get("ip", f"Subnet-{source_id}")
+            else:
+                node_label = source_props.get("name", source_props.get("dn", f"Node-{source_id}"))
 
             nodes_dict[source_id] = GraphNode(
                 id=source_id,
@@ -2112,7 +2118,13 @@ def get_graph_data():
                 target_labels = record["target_labels"] or []
                 target_props = sanitize_properties(record["target_props"] or {})
                 node_type = target_labels[0] if target_labels else "Unknown"
-                node_label = target_props.get("name", target_props.get("dn", f"Node-{target_id}"))
+
+                # Special handling for nodes without 'name' property
+                if node_type == "Subnet":
+                    # Subnets use 'ip' property for display
+                    node_label = target_props.get("ip", f"Subnet-{target_id}")
+                else:
+                    node_label = target_props.get("name", target_props.get("dn", f"Node-{target_id}"))
 
                 nodes_dict[target_id] = GraphNode(
                     id=target_id,
