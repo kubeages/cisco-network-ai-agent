@@ -1238,10 +1238,28 @@ Selected tools:"""
         tools_need_fabric = any(any(kw in t.lower() for kw in fabric_keywords)
                                 for t in selected_tools[:3])
 
-        # Also check if question explicitly mentions a fabric
+        # Also check if question explicitly mentions a fabric or tenant
         import re
         fabric_match = re.search(r"fabric\s+['\"]?([a-zA-Z0-9_-]+)['\"]?", question.lower())
         specific_fabric = fabric_match.group(1) if fabric_match else None
+
+        # Check if question mentions a tenant - resolve to fabric
+        tenant_match = re.search(r"tenant\s+['\"]?([a-zA-Z0-9_-]+)['\"]?", question.lower())
+        if tenant_match and not specific_fabric:
+            tenant_name = tenant_match.group(1)
+            try:
+                # Find which fabric owns this tenant
+                tenant_fabric_query = f"""
+                MATCH (f:Fabric)-[:MANAGES]->(t:Tenant {{name: '{tenant_name}'}})
+                RETURN f.name AS fabric
+                LIMIT 1
+                """
+                tenant_fabric_result = graph.query(tenant_fabric_query)
+                if tenant_fabric_result and len(tenant_fabric_result) > 0:
+                    specific_fabric = tenant_fabric_result[0].get('fabric')
+                    print(f"📊 Resolved tenant '{tenant_name}' to fabric '{specific_fabric}'")
+            except Exception as e:
+                print(f"⚠️ Failed to resolve tenant '{tenant_name}' to fabric: {e}")
 
         if tools_need_fabric or specific_fabric:
             try:
