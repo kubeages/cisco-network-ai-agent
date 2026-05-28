@@ -718,7 +718,57 @@ def clean_cypher_output(cypher_text: str) -> str:
     result = balance_brackets(result, '{', '}')
     result = balance_brackets(result, '[', ']')
 
+    # Fix multiple RETURN statements (common LLM error)
+    # Keep only the first RETURN statement
+    return_count = len(re.findall(r'\bRETURN\b', result, re.IGNORECASE))
+    if return_count > 1:
+        print(f"⚠️ Found {return_count} RETURN statements, keeping only the first")
+        # Find position of second RETURN and truncate
+        parts = re.split(r'\bRETURN\b', result, maxsplit=2, flags=re.IGNORECASE)
+        if len(parts) >= 2:
+            # Reconstruct with only first RETURN
+            result = parts[0] + 'RETURN' + parts[1]
+
     return result
+
+
+def validate_cypher_query(cypher: str) -> tuple[bool, str]:
+    """
+    Validate a Cypher query for common issues.
+    Returns (is_valid, error_message)
+    """
+    import re
+
+    if not cypher or not cypher.strip():
+        return False, "Empty query"
+
+    cypher_upper = cypher.upper()
+
+    # Check if starts with valid keyword
+    valid_starts = ('MATCH', 'OPTIONAL', 'WITH', 'CALL', 'RETURN', 'UNWIND', 'CREATE', 'MERGE')
+    if not any(cypher_upper.strip().startswith(kw) for kw in valid_starts):
+        return False, "Query must start with MATCH, OPTIONAL MATCH, WITH, CALL, RETURN, or similar keyword"
+
+    # Check for multiple RETURN statements (shouldn't happen after cleaning)
+    return_count = len(re.findall(r'\bRETURN\b', cypher_upper))
+    if return_count > 1:
+        return False, f"Query contains {return_count} RETURN statements (should have only one)"
+
+    # Check for pattern expressions in RETURN clause (Neo4j doesn't allow this)
+    # Pattern like: RETURN ... (n)-[:REL]->(m) ...
+    return_match = re.search(r'RETURN\s+(.+)', cypher, re.IGNORECASE | re.DOTALL)
+    if return_match:
+        return_clause = return_match.group(1)
+        # Check for relationship patterns in RETURN
+        if re.search(r'\([^)]*\)-\[', return_clause):
+            return False, "Cannot use relationship patterns in RETURN clause (use OPTIONAL MATCH instead)"
+
+    # Basic bracket balance check
+    for open_char, close_char in [('(', ')'), ('{', '}'), ('[', ']')]:
+        if cypher.count(open_char) != cypher.count(close_char):
+            return False, f"Unbalanced {open_char}{close_char} brackets"
+
+    return True, ""
 
 # --- Create the GraphCypherQAChain ---
 graph_qa_chain = GraphCypherQAChain.from_llm(
@@ -1188,7 +1238,9 @@ async def query_hybrid(question: str, chat_history: str = "") -> tuple[str, List
         raw_cypher = cypher_response.content if hasattr(cypher_response, 'content') else str(cypher_response)
         clean_cypher = clean_cypher_output(raw_cypher)
 
-        if clean_cypher and clean_cypher.strip().upper().startswith(('MATCH', 'OPTIONAL', 'WITH', 'CALL', 'RETURN')):
+        # Validate Cypher query
+        is_valid, validation_error = validate_cypher_query(clean_cypher)
+        if is_valid:
             neo4j_result = traced_neo4j_query(graph, clean_cypher, "neo4j.cypher.hybrid_query")
 
             all_sources.append(DataSource(
@@ -1199,6 +1251,7 @@ async def query_hybrid(question: str, chat_history: str = "") -> tuple[str, List
 
             neo4j_context = f"Topology Data:\n{str(neo4j_result)}"
         else:
+            print(f"⚠️ Invalid Cypher in hybrid query: {validation_error}")
             neo4j_context = "No topology data available."
     except Exception as e:
         print(f"⚠️ Neo4j query failed in hybrid mode: {e}")
@@ -1307,10 +1360,13 @@ async def ask_agent(query: Query):
             clean_cypher = clean_cypher_output(raw_cypher)
             print(f"🧹 Cleaned Cypher:\n{clean_cypher}")
 
-            # Step 3: Execute the Cypher query
-            if not clean_cypher or not clean_cypher.strip().upper().startswith(('MATCH', 'OPTIONAL', 'WITH', 'CALL', 'RETURN')):
-                raise ValueError("Generated text does not appear to be a valid Cypher query")
+            # Step 3: Validate the Cypher query
+            is_valid, validation_error = validate_cypher_query(clean_cypher)
+            if not is_valid:
+                print(f"❌ Cypher validation failed: {validation_error}")
+                raise ValueError(f"Invalid Cypher query: {validation_error}")
 
+            # Step 4: Execute the Cypher query
             query_result = traced_neo4j_query(graph, clean_cypher, "neo4j.cypher.user_query")
             print(f"📊 Query returned {len(query_result)} results")
 
@@ -1488,8 +1544,11 @@ async def ask_agent_stream(query: Query):
                 raw_cypher = cypher_response.content if hasattr(cypher_response, 'content') else str(cypher_response)
                 clean_cypher = clean_cypher_output(raw_cypher)
 
-                if not clean_cypher or not clean_cypher.strip().upper().startswith(('MATCH', 'OPTIONAL', 'WITH', 'CALL', 'RETURN')):
-                    raise ValueError("Generated text does not appear to be a valid Cypher query")
+                # Validate the Cypher query
+                is_valid, validation_error = validate_cypher_query(clean_cypher)
+                if not is_valid:
+                    print(f"❌ Cypher validation failed: {validation_error}")
+                    raise ValueError(f"Invalid Cypher query: {validation_error}")
 
                 # Step 2: Execute query
                 yield f"data: {json.dumps({'status': 'querying', 'message': '🔎 Querying the knowledge graph...'})}\n\n"
