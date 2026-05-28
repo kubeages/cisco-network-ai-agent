@@ -911,7 +911,28 @@ Selected tools:"""
 
         for tool_name in selected_tools[:3]:  # Limit to 3 tools max
             try:
-                result = await mcp.call_tool(tool_name, {})
+                # Build arguments for the tool
+                tool_args = {}
+
+                # Common parameters that many tools need
+                tool_lower = tool_name.lower()
+
+                # Add fabricName if tool seems to need it
+                if "fabric" in tool_lower or "resource" in tool_lower or "device" in tool_lower:
+                    # Use the configured fabric name from environment
+                    fabric_name = os.getenv("APIC_FABRIC_NAME", "")
+                    if fabric_name:
+                        tool_args["fabricName"] = fabric_name
+
+                # Add siteGroupName if asking about sites
+                if "site" in question_lower and "sitegroup" in tool_lower:
+                    # Could extract from question with LLM, for now use a default or empty
+                    pass
+
+                # Log the call with arguments
+                print(f"🔧 Calling {tool_name} with args: {tool_args}")
+
+                result = await mcp.call_tool(tool_name, tool_args)
 
                 # Extract text from MCP response
                 content = result.get("content", [])
@@ -922,7 +943,7 @@ Selected tools:"""
                     sources.append(DataSource(
                         type="mcp",
                         description=f"Real-time data from {tool_name}",
-                        details={"tool": tool_name, "arguments": {}}
+                        details={"tool": tool_name, "arguments": tool_args}
                     ))
             except Exception as e:
                 print(f"⚠️ Failed to execute tool {tool_name}: {e}")
