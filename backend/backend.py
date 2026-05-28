@@ -487,6 +487,7 @@ CYPHER_GENERATION_TEMPLATE = """Generate a Cypher query. Output ONLY the query, 
 - AppProfile -[:HAS_EPG]-> EPG (application profiles have EPGs)
 - Tenant -[:HAS_VRF]-> VRF (tenants have VRFs)
 - Tenant -[:HAS_BD]-> BridgeDomain (tenants have bridge domains)
+- BridgeDomain -[:HAS_SUBNET]-> Subnet (bridge domains have subnets)
 
 IMPORTANT: Severity values are ALWAYS lowercase: 'critical', 'major', 'warning', 'minor'
 
@@ -495,6 +496,7 @@ Common Node properties: name, role (spine/leaf), model, address, serial, fabricS
 Common Fabric properties: name, health, status
 Common Fault properties: code, severity, descr, cause, created
 Common Anomaly properties: name, severity, category, details, lastSeen
+Common Subnet properties: ip, scope, bd, tenant
 
 === EXAMPLES ===
 
@@ -589,6 +591,19 @@ WHERE f.name = 'ams-aci' AND n.role = 'leaf'
 OPTIONAL MATCH (n)-[:HAS_FAULT]->(fault:Fault)
 RETURN n.name, n.model, n.address, count(fault) AS fault_count
 ORDER BY fault_count DESC
+
+EXAMPLE 13 - Subnets under a BridgeDomain:
+Question: "Show all subnets under BridgeDomain 'inb'"
+MATCH (bd:BridgeDomain {name: 'inb'})-[:HAS_SUBNET]->(s:Subnet)
+RETURN s.ip AS subnet_ip, s.scope AS scope
+
+EXAMPLE 14 - BridgeDomain with all details including subnets:
+Question: "Describe BridgeDomain 'inb' with all its subnets"
+MATCH (bd:BridgeDomain {name: 'inb'})
+OPTIONAL MATCH (bd)-[:HAS_SUBNET]->(s:Subnet)
+OPTIONAL MATCH (t:Tenant)-[:HAS_BD]->(bd)
+RETURN bd.name AS bridge_domain, t.name AS tenant,
+       collect(s.ip) AS subnet_ips, collect(s.scope) AS subnet_scopes
 
 Schema:
 {schema}
