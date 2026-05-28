@@ -1333,8 +1333,31 @@ Selected tools:"""
                     continue
 
         if results:
-            # Synthesize answer from tool results
-            combined_results = "\n\n".join(results)
+            # Truncate results to fit within token budget
+            # Target: ~6000 tokens for results (leave 2000 for prompt + answer)
+            MAX_RESULT_TOKENS = 6000
+
+            # Estimate tokens (rough: ~4 chars per token)
+            truncated_results = []
+            current_tokens = 0
+
+            for result in results:
+                result_tokens = len(result) // 4  # Rough estimate
+                if current_tokens + result_tokens <= MAX_RESULT_TOKENS:
+                    truncated_results.append(result)
+                    current_tokens += result_tokens
+                else:
+                    # Add truncated version if space allows
+                    remaining_tokens = MAX_RESULT_TOKENS - current_tokens
+                    if remaining_tokens > 100:  # At least 100 tokens worth
+                        chars_to_include = remaining_tokens * 4
+                        truncated_results.append(result[:chars_to_include] + "\n[... truncated ...]")
+                    break
+
+            combined_results = "\n\n".join(truncated_results)
+
+            if len(truncated_results) < len(results):
+                print(f"⚠️ Truncated MCP results: kept {len(truncated_results)}/{len(results)} results to fit token budget")
 
             # Use LLM to format the results into a natural answer
             synthesis_prompt = f"""Based on the following real-time data from Nexus Dashboard, provide a clear and concise answer to the question.
