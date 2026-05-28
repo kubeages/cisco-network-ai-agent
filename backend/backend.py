@@ -500,14 +500,19 @@ Common Subnet properties: ip, scope, bd, tenant
 
 === EXAMPLES ===
 
-EXAMPLE 1 - Node details with fabric and faults:
+EXAMPLE 1 - Simple node property query:
+Question: "What is the model of node 'leaf-101'?" or "Show me node 'leaf-101'"
+MATCH (n:Node {{name: 'leaf-101'}})
+RETURN n.name, n.model, n.role, n.address
+
+EXAMPLE 2 - Node details with fabric and faults:
 Question: "Show me details about node 'leaf-102' including its role, model, and any faults"
 MATCH (n:Node {{name: 'leaf-102'}})-[:BELONGS_TO]->(f:Fabric)
 OPTIONAL MATCH (n)-[:HAS_FAULT]->(fault:Fault)
 RETURN n.name, n.role, n.model, n.address, n.serial, f.name AS fabric_name,
        fault.code AS fault_code, fault.severity AS fault_severity, fault.descr AS fault_description
 
-EXAMPLE 2 - Nodes with warning faults in a fabric:
+EXAMPLE 3 - Nodes with warning faults in a fabric:
 Question: "List nodes in fabric 'ams-aci' with warning faults"
 MATCH (n:Node)-[:BELONGS_TO]->(f:Fabric)
 WHERE f.name = 'ams-aci'
@@ -515,26 +520,26 @@ MATCH (n)-[:HAS_FAULT]->(fault:Fault)
 WHERE fault.severity = 'warning'
 RETURN n.name AS node_name, fault.code AS fault_code, fault.descr AS description
 
-EXAMPLE 3 - List ALL anomalies in a fabric with full details:
+EXAMPLE 4 - List ALL anomalies in a fabric with full details:
 Question: "List all anomalies in fabric 'ams-aci'"
 MATCH (f:Fabric)-[:HAS_ANOMALY]->(a:Anomaly)
 WHERE f.name = 'ams-aci'
 RETURN a.name AS anomaly_name, a.severity, a.lastSeen
 ORDER BY a.severity
 
-EXAMPLE 4 - All faults for a specific node:
+EXAMPLE 5 - All faults for a specific node:
 Question: "Show faults for node 'leaf-104'"
 MATCH (n:Node)-[:HAS_FAULT]->(f:Fault)
 WHERE n.name = 'leaf-104'
 RETURN n.name AS node, f.code, f.severity, f.descr AS description, f.cause
 
-EXAMPLE 5 - Anomalies with specific severity:
+EXAMPLE 6 - Anomalies with specific severity:
 Question: "List critical anomalies in fabric 'ams-aci'"
 MATCH (f:Fabric)-[:HAS_ANOMALY]->(a:Anomaly)
 WHERE f.name = 'ams-aci' AND a.severity = 'critical'
 RETURN a.name AS anomaly_name, a.severity, a.lastSeen
 
-EXAMPLE 6 - Fabric status overview with counts:
+EXAMPLE 7 - Fabric status overview with counts:
 Question: "What is the status of fabric 'ams-aci'?"
 MATCH (f:Fabric)
 WHERE f.name = 'ams-aci'
@@ -542,7 +547,7 @@ OPTIONAL MATCH (f)-[:HAS_ANOMALY]->(a:Anomaly)
 RETURN f.name AS fabric_name, count(a) AS anomaly_count,
        collect(a.name) AS anomaly_names, collect(a.severity) AS severities
 
-EXAMPLE 7 - Tenant with all related entities:
+EXAMPLE 8 - Tenant with all related entities:
 Question: "Tell me about tenant 'example-tenant'"
 MATCH (t:Tenant)
 WHERE t.name = 'example-tenant'
@@ -556,20 +561,20 @@ RETURN t.name AS tenant,
        collect(DISTINCT vrf.name) AS vrfs,
        collect(DISTINCT bd.name) AS bridge_domains
 
-EXAMPLE 8 - Tenants in a fabric:
+EXAMPLE 9 - Tenants in a fabric:
 Question: "What tenants exist in fabric 'ams-aci'?"
 MATCH (t:Tenant)-[:BELONGS_TO]->(f:Fabric)
 WHERE f.name = 'ams-aci'
 RETURN t.name AS tenant_name
 
-EXAMPLE 9 - Tenants affected by anomalies:
+EXAMPLE 10 - Tenants affected by anomalies:
 Question: "Show me tenants with anomalies"
 MATCH (a:Anomaly)-[:AFFECTS]->(t:Tenant)
 RETURN t.name AS tenant_name,
        collect(a.name) AS anomalies,
        collect(a.severity) AS severities
 
-EXAMPLE 10 - Details about a specific anomaly:
+EXAMPLE 11 - Details about a specific anomaly:
 Question: "Tell me about the ENDPOINT_TRAFFIC_SCORE_UNHEALTHY anomaly"
 MATCH (a:Anomaly {{name: 'ENDPOINT_TRAFFIC_SCORE_UNHEALTHY'}})
 OPTIONAL MATCH (a)-[:AFFECTS]->(t:Tenant)
@@ -578,13 +583,13 @@ RETURN a.name, a.severity, a.category, a.details,
        collect(DISTINCT t.name) AS affected_tenants,
        collect(DISTINCT f.name) AS fabrics
 
-EXAMPLE 11 - Anomalies affecting a specific tenant:
+EXAMPLE 12 - Anomalies affecting a specific tenant:
 Question: "What anomalies affect the flexpod tenant?"
 MATCH (a:Anomaly)-[:AFFECTS]->(t:Tenant)
 WHERE t.name = 'flexpod'
 RETURN t.name AS tenant_name, a.name AS anomaly_name, a.severity, a.details
 
-EXAMPLE 12 - Nodes with multiple properties and counts:
+EXAMPLE 13 - Nodes with multiple properties and counts:
 Question: "Show all leaf nodes in fabric 'ams-aci' with their fault counts"
 MATCH (n:Node)-[:BELONGS_TO]->(f:Fabric)
 WHERE f.name = 'ams-aci' AND n.role = 'leaf'
@@ -592,12 +597,12 @@ OPTIONAL MATCH (n)-[:HAS_FAULT]->(fault:Fault)
 RETURN n.name, n.model, n.address, count(fault) AS fault_count
 ORDER BY fault_count DESC
 
-EXAMPLE 13 - Subnets under a BridgeDomain:
+EXAMPLE 14 - Subnets under a BridgeDomain:
 Question: "Show all subnets under BridgeDomain 'inb'"
 MATCH (bd:BridgeDomain {{name: 'inb'}})-[:HAS_SUBNET]->(s:Subnet)
 RETURN s.ip AS subnet_ip, s.scope AS scope
 
-EXAMPLE 14 - BridgeDomain with all details including subnets:
+EXAMPLE 15 - BridgeDomain with all details including subnets:
 Question: "Describe BridgeDomain 'inb' with all its subnets"
 MATCH (bd:BridgeDomain {{name: 'inb'}})
 OPTIONAL MATCH (bd)-[:HAS_SUBNET]->(s:Subnet)
