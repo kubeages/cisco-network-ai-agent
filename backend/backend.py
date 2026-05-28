@@ -2114,14 +2114,16 @@ def sanitize_properties(props: dict) -> dict:
 def get_graph_data():
     """Return all nodes and relationships for visualization"""
 
-    # Query to get all nodes and relationships
+    # Query to get all nodes and relationships, including parent tenant for context
     query = """
     MATCH (n)
     OPTIONAL MATCH (n)-[r]->(m)
+    OPTIONAL MATCH (tenant:Tenant)-[:HAS_APP_PROFILE|HAS_EPG|HAS_VRF|HAS_BRIDGE_DOMAIN*1..3]->(n)
     RETURN
         id(n) AS source_id,
         labels(n) AS source_labels,
         properties(n) AS source_props,
+        tenant.name AS parent_tenant,
         type(r) AS rel_type,
         id(m) AS target_id,
         labels(m) AS target_labels,
@@ -2140,6 +2142,10 @@ def get_graph_data():
             source_labels = record["source_labels"] or []
             source_props = sanitize_properties(record["source_props"] or {})
             node_type = source_labels[0] if source_labels else "Unknown"
+
+            # Add parent tenant to properties if available
+            if record.get("parent_tenant"):
+                source_props["_parent_tenant"] = record["parent_tenant"]
 
             # Special handling for nodes without 'name' property
             if node_type == "Subnet":

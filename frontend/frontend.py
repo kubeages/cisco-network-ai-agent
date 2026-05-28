@@ -112,13 +112,13 @@ initial_suggestions = [
 # Node type to query mapping
 NODE_QUERY_TEMPLATES = {
     "Tenant": "Tell me about the tenant '{name}'. What application profiles, EPGs, VRFs, and Bridge Domains does it have? Are there any anomalies affecting it?",
-    "AppProfile": "What EPGs belong to the application profile '{name}'? Show me its structure and any issues.",
-    "EPG": "Describe the EPG '{name}'. What tenant and application profile does it belong to?",
+    "AppProfile": "What EPGs belong to the application profile '{name}'{tenant_context}? Show me its structure and any issues.",
+    "EPG": "Describe the EPG '{name}'{tenant_context}. What tenant and application profile does it belong to?",
     "Fabric": "What is the status of the fabric '{name}'? List any anomalies and advisories detected in this fabric.",
     "Anomaly": "Tell me more about this anomaly: '{name}'. What is its severity and which resources are affected? How can I fix it?",
     "HealthSummary": "Show me the health summary details for '{name}'.",
-    "VRF": "Tell me about the VRF '{name}'. Which tenant does it belong to and what is its purpose in the network?",
-    "BridgeDomain": "Describe the Bridge Domain '{name}'. What subnets are configured in it and which tenant owns it?",
+    "VRF": "Tell me about the VRF '{name}'{tenant_context}. Which tenant does it belong to and what is its purpose in the network?",
+    "BridgeDomain": "Describe the Bridge Domain '{name}'{tenant_context}. What subnets are configured in it and which tenant owns it?",
     "Subnet": "What is the subnet '{name}'? Which Bridge Domain contains it and what is its scope?",
     "Node": "Show me details about the fabric node '{name}'. What is its role (spine/leaf), model, and current status? Are there any faults affecting it?",
     "Fault": "Tell me about this fault: '{name}'. What is its severity, cause, and which object is affected? How can I resolve it?",
@@ -2280,13 +2280,27 @@ with gr.Blocks(theme=gr.themes.Base(), title="Network AI Agent", css=custom_css,
             node_data = json.loads(node_data_json)
             node_type = node_data.get("nodeType", "Unknown")
             node_label = node_data.get("nodeLabel", "Unknown")
+            node_properties = node_data.get("properties", {})
+
+            # Check if node has a parent tenant
+            parent_tenant = node_properties.get("_parent_tenant")
 
             # Generate contextual query
             template = NODE_QUERY_TEMPLATES.get(node_type, NODE_QUERY_TEMPLATES["Unknown"])
-            question = template.format(name=node_label)
+
+            # Inject tenant context if available
+            if parent_tenant and "{tenant_context}" in template:
+                tenant_context = f" in tenant '{parent_tenant}'"
+                question = template.format(name=node_label, tenant_context=tenant_context)
+            else:
+                # No tenant context available or not needed for this template
+                question = template.format(name=node_label, tenant_context="")
 
             # Update selected node display
-            selected_display = f"**Selected:** {node_type} - *{node_label}*"
+            if parent_tenant:
+                selected_display = f"**Selected:** {node_type} - *{node_label}* (tenant: {parent_tenant})"
+            else:
+                selected_display = f"**Selected:** {node_type} - *{node_label}*"
 
             return question, selected_display
 
