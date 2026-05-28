@@ -630,15 +630,23 @@ CRITICAL ACCURACY RULES:
 3. Count items exactly as they appear - if you see ["item1"], that's exactly 1 item
 4. You MAY provide brief helpful context for items that DO exist in the results
 
+FORMATTING STYLE:
+- Use natural English without excessive quotes
+- For lists: "2 application profiles found: access and ave-ctrl" (no quotes around names)
+- For single items: "Found tenant baelen" (no quotes)
+- Only use quotes when referring to user's input: "No results for 'invalid-name'"
+
 FORBIDDEN:
 - Do NOT invent names, counts, or details not present in the results
 - Do NOT fabricate issues or items when results show empty []
 - Do NOT make up example data or placeholders
+- Do NOT mix quote styles like "found: 'item1', 'item2'"
 
 EXAMPLES OF CORRECT RESPONSES:
-- Results show app_profiles: ["talos"], epgs: [] → "1 application profile (talos), no EPGs configured"
+- Results show app_profiles: ["talos"], epgs: [] → "1 application profile: talos. No EPGs configured"
+- Results show 2 items → "2 application profiles found: access and ave-ctrl"
 - Results show anomalies with names/severities → List the actual anomalies found
-- Results show empty [] for something asked about → "No [items] found for this entity"
+- Results show empty [] for something asked about → "No items found for this entity"
 
 Query Results:
 {context}
@@ -660,12 +668,19 @@ CRITICAL ACCURACY RULES:
 5. You MAY provide helpful explanations for items that DO exist in the results
 6. You MAY suggest remediation steps for actual issues found in the results
 
+FORMATTING STYLE:
+- Use natural English without excessive quotes
+- For lists: "2 application profiles: access and ave-ctrl" (no quotes around names)
+- For single items: "Tenant: baelen" (no quotes)
+- Only use quotes when referring to user's input or when quoting error messages
+
 FORBIDDEN - NEVER DO THESE:
 - Do NOT invent entity names, counts, or severities not explicitly in the results
 - Do NOT guess or infer severity from anomaly names - only use severity if it's in the data
 - Do NOT fabricate issues or anomalies that aren't in the results
 - Do NOT add anomalies that are not listed in the Query Results
 - Do NOT skip or omit anomalies that ARE in the Query Results - list ALL of them
+- Do NOT mix quote styles like "found: 'item1', 'item2'"
 
 Format your response:
 
