@@ -1059,15 +1059,30 @@ Selected tools:"""
 
         # Discover available fabrics from Neo4j if tools need fabricName
         fabric_names = []
-        tools_need_fabric = any("fabric" in t.lower() or "resource" in t.lower() or "device" in t.lower()
+
+        # Check if tools need fabric parameter (broader pattern matching)
+        fabric_keywords = ["fabric", "resource", "device", "analyze", "status", "overview",
+                          "telemetry", "health", "interface", "anomal", "compliance"]
+        tools_need_fabric = any(any(kw in t.lower() for kw in fabric_keywords)
                                 for t in selected_tools[:3])
 
-        if tools_need_fabric:
+        # Also check if question explicitly mentions a fabric
+        import re
+        fabric_match = re.search(r"fabric\s+['\"]?([a-zA-Z0-9_-]+)['\"]?", question.lower())
+        specific_fabric = fabric_match.group(1) if fabric_match else None
+
+        if tools_need_fabric or specific_fabric:
             try:
-                fabric_query = "MATCH (f:Fabric) RETURN f.name AS fabric"
-                fabric_result = graph.query(fabric_query)
-                fabric_names = [row['fabric'] for row in fabric_result if row.get('fabric')]
-                print(f"📊 Discovered {len(fabric_names)} fabrics from Neo4j: {fabric_names}")
+                if specific_fabric:
+                    # Question mentions specific fabric - use only that one
+                    fabric_names = [specific_fabric]
+                    print(f"📊 Using fabric from question: {specific_fabric}")
+                else:
+                    # Query all fabrics from Neo4j
+                    fabric_query = "MATCH (f:Fabric) RETURN f.name AS fabric"
+                    fabric_result = graph.query(fabric_query)
+                    fabric_names = [row['fabric'] for row in fabric_result if row.get('fabric')]
+                    print(f"📊 Discovered {len(fabric_names)} fabrics from Neo4j: {fabric_names}")
             except Exception as e:
                 print(f"⚠️ Failed to query fabrics from Neo4j: {e}")
                 # Fallback to environment variable
@@ -1078,8 +1093,8 @@ Selected tools:"""
         for tool_name in selected_tools[:3]:  # Limit to 3 tools max
             tool_lower = tool_name.lower()
 
-            # Determine if this tool needs fabric parameter
-            needs_fabric = "fabric" in tool_lower or "resource" in tool_lower or "device" in tool_lower
+            # Determine if this tool needs fabric parameter (broader matching)
+            needs_fabric = any(kw in tool_lower for kw in fabric_keywords)
 
             if needs_fabric and fabric_names:
                 # Call tool for each fabric and aggregate results
