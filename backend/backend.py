@@ -637,9 +637,10 @@ CRITICAL ACCURACY RULES:
 
 FORMATTING STYLE:
 - Use natural English without excessive quotes
-- For lists: "2 application profiles found: access and ave-ctrl" (no quotes around names)
-- For single items: "Found tenant baelen" (no quotes)
-- Only use quotes when referring to user's input: "No results for 'invalid-name'"
+- DO NOT wrap your entire answer in quotes
+- For lists: 2 application profiles found: access and ave-ctrl (no quotes around names)
+- For single items: Found tenant baelen (no quotes)
+- Only use quotes when referring to user's input: No results for 'invalid-name'
 
 FORBIDDEN:
 - Do NOT invent names, counts, or details not present in the results
@@ -675,8 +676,9 @@ CRITICAL ACCURACY RULES:
 
 FORMATTING STYLE:
 - Use natural English without excessive quotes
-- For lists: "2 application profiles: access and ave-ctrl" (no quotes around names)
-- For single items: "Tenant: baelen" (no quotes)
+- DO NOT wrap your entire answer in quotes
+- For lists: 2 application profiles: access and ave-ctrl (no quotes around names)
+- For single items: Tenant: baelen (no quotes)
 - Only use quotes when referring to user's input or when quoting error messages
 
 FORBIDDEN - NEVER DO THESE:
