@@ -777,7 +777,7 @@ Follow-up queries:"""
 # --- Query Classification and MCP Integration ---
 def classify_query_intent(question: str) -> str:
     """
-    Classify query intent to determine data source.
+    Classify query intent to determine data source using keywords + LLM.
 
     Returns:
         "neo4j" - Static topology, relationships, historical data
@@ -805,17 +805,60 @@ def classify_query_intent(question: str) -> str:
         "was", "were", "used to", "last month", "yesterday"
     ]
 
-    # Check for live data indicators
+    # Keywords indicating network-wide scope (suggests hybrid)
+    scope_keywords = [
+        "across", "all", "entire", "whole", "network-wide",
+        "every", "each", "multiple", "fabrics"
+    ]
+
+    # Check for indicators
     has_live = any(keyword in question_lower for keyword in live_keywords)
     has_topology = any(keyword in question_lower for keyword in topology_keywords)
     has_historical = any(keyword in question_lower for keyword in historical_keywords)
+    has_scope = any(keyword in question_lower for keyword in scope_keywords)
 
+    # Improved classification rules
     if has_historical:
         return "neo4j"  # Historical data only in Neo4j
-    elif has_live and has_topology:
-        return "hybrid"  # Needs both topology and live data
+    elif has_live and (has_topology or has_scope):
+        return "hybrid"  # Needs topology discovery + live data
     elif has_live:
-        return "mcp"  # Live data only
+        # Use LLM to determine if this is truly MCP-only or needs hybrid
+        # For queries that might need multi-fabric data
+        if has_scope or any(word in question_lower for word in ["network", "fabric", "site"]):
+            classification_prompt = f"""Classify this network monitoring query into ONE category:
+
+- "neo4j": Query about topology, relationships, connections, or historical data
+- "mcp": Query about live metrics for a SINGLE specific device/fabric
+- "hybrid": Query about live metrics ACROSS multiple fabrics/devices, or combining topology with live data
+
+Question: {question}
+
+Think step-by-step:
+1. Does it ask for live/current data?
+2. Does it need to know about multiple fabrics or network-wide scope?
+3. Does it combine topology (what's connected) with metrics?
+
+Classification (respond with ONLY one word - neo4j, mcp, or hybrid):"""
+
+            try:
+                llm_response = qa_llm.invoke(classification_prompt)
+                llm_classification = llm_response.content.strip().lower() if hasattr(llm_response, 'content') else str(llm_response).strip().lower()
+
+                # Extract the classification (handle cases where LLM adds explanation)
+                for valid_type in ["hybrid", "neo4j", "mcp"]:
+                    if valid_type in llm_classification:
+                        print(f"🤖 LLM refined classification: {valid_type}")
+                        return valid_type
+
+                # Fallback if LLM response is unclear
+                print(f"⚠️ LLM classification unclear: '{llm_classification}', defaulting to hybrid for network-scoped query")
+                return "hybrid"
+            except Exception as e:
+                print(f"⚠️ LLM classification failed: {e}, defaulting to hybrid")
+                return "hybrid"
+        else:
+            return "mcp"  # Live data, single scope
     else:
         return "neo4j"  # Default to Neo4j for topology/anomalies
 
