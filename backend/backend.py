@@ -876,17 +876,26 @@ def is_anomaly_query(question: str) -> bool:
 suggestion_prompt = PromptTemplate.from_template(
     """You are a network operations assistant. Based on the conversation, generate three direct follow-up queries that a user might want to ask next.
 
+CRITICAL: PRESERVE CONTEXT! If the question mentions a specific tenant, fabric, node, or other entity, INCLUDE that context in your suggestions.
+
 IMPORTANT: Write each suggestion as a direct command or question that will be sent to the AI, NOT as a question asking the user what they want.
 
-Good examples:
-- "List all EPGs under tenant 'example'"
-- "Show the anomalies affecting fabric 'ams-aci'"
-- "What is the severity of the INTERFACE_DOWN anomaly?"
+Good examples (notice how context is preserved):
+- Question about tenant 'edge' → "Show EPGs in AppProfile 'network-segments' under tenant 'edge'"
+- Question about fabric 'ams-aci' → "Show all nodes in fabric 'ams-aci'"
+- Question about node 'leaf-102' → "What faults affect node 'leaf-102'?"
+- General question → "List all tenants" (no specific context to preserve)
 
 Bad examples (do NOT use these formats):
-- "Do you want me to list the EPGs?"
-- "Should I check the anomalies?"
-- "Would you like to see more details?"
+- "Do you want me to list the EPGs?" (asking user, not direct query)
+- "Should I check the anomalies?" (asking user, not direct query)
+- "Show details of AppProfile 'X'" (missing tenant context if tenant was mentioned in question)
+
+Context preservation rules:
+1. If question mentions "tenant 'X'", include "in tenant 'X'" or "under tenant 'X'" in suggestions
+2. If question mentions "fabric 'Y'", include "in fabric 'Y'" in suggestions
+3. If question mentions "node 'Z'", include references to that specific node
+4. If answer mentions specific names (tenants, fabrics, AppProfiles), use those in suggestions
 
 The network graph has the following schema: {schema}
 
