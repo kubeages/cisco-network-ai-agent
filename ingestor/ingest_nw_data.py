@@ -571,6 +571,17 @@ def process_intersight_data(driver, mcp_url=None):
         servers = servers_response.results
         print(f"  📊 Found {len(servers)} servers in Intersight")
 
+        # Test: Query all adapters without filter to see if any exist
+        print(f"  🔍 Testing adapter query (first 10)...")
+        try:
+            test_adapters = adapter_instance.get_adapter_host_eth_interface_list(top=10)
+            if test_adapters and hasattr(test_adapters, 'results'):
+                print(f"    Total adapters in system: {len(test_adapters.results)} (showing first 10)")
+                for tadapter in test_adapters.results[:3]:
+                    print(f"      - {getattr(tadapter, 'name', 'N/A')}, MAC: {getattr(tadapter, 'mac_address', 'N/A')}, Parent: {getattr(getattr(tadapter, 'parent', None), 'moid', 'N/A')}")
+        except Exception as e:
+            print(f"    ⚠️  Test query failed: {e}")
+
         with driver.session() as db_session:
             for server in servers:
                 try:
@@ -665,6 +676,8 @@ def process_intersight_data(driver, mcp_url=None):
 
                         if adapters_response and hasattr(adapters_response, 'results'):
                             adapters = adapters_response.results
+                            if len(adapters) > 0:
+                                print(f"    📡 Found {len(adapters)} adapters for server '{server_name}'")
 
                             # Process each ethernet interface
                             for adapter in adapters:
