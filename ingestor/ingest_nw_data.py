@@ -583,22 +583,35 @@ def process_intersight_data(driver, mcp_url=None):
                 all_adapters = all_adapters_response.results
                 print(f"    Found {len(all_adapters)} total adapters in system")
 
-                # Group adapters by parent MOID for efficient lookup
+                # Group adapters by compute server MOID
+                # Hierarchy: compute.Blade/RackUnit → adapter.Unit → adapter.HostEthInterface
+                # We need to navigate from adapter → adapter.Unit (parent) → compute object
                 sample_parent_types = set()
                 for adapter in all_adapters:
-                    parent = getattr(adapter, 'parent', None)
-                    if parent:
-                        parent_moid = getattr(parent, 'moid', None)
-                        parent_type = getattr(parent, 'object_type', 'Unknown')
+                    # adapter.parent is adapter.Unit
+                    adapter_unit = getattr(adapter, 'parent', None)
+                    if adapter_unit:
+                        adapter_unit_type = getattr(adapter_unit, 'object_type', 'Unknown')
                         if len(sample_parent_types) < 5:
-                            sample_parent_types.add(parent_type)
-                        if parent_moid:
-                            if parent_moid not in adapters_by_parent:
-                                adapters_by_parent[parent_moid] = []
-                            adapters_by_parent[parent_moid].append(adapter)
-                print(f"    Grouped adapters by {len(adapters_by_parent)} parent servers")
-                print(f"    Adapter parent types: {sample_parent_types}")
-                print(f"    Sample adapter parent MOIDs: {list(adapters_by_parent.keys())[:3]}")
+                            sample_parent_types.add(adapter_unit_type)
+
+                        # adapter.Unit should have a reference to the compute object
+                        # Try: compute_blade, compute_rack_unit, registered_device, or parent
+                        compute_ref = (getattr(adapter_unit, 'compute_blade', None) or
+                                      getattr(adapter_unit, 'compute_rack_unit', None) or
+                                      getattr(adapter_unit, 'registered_device', None) or
+                                      getattr(adapter_unit, 'parent', None))
+
+                        if compute_ref:
+                            compute_moid = getattr(compute_ref, 'moid', None)
+                            if compute_moid:
+                                if compute_moid not in adapters_by_parent:
+                                    adapters_by_parent[compute_moid] = []
+                                adapters_by_parent[compute_moid].append(adapter)
+
+                print(f"    Grouped adapters by {len(adapters_by_parent)} compute servers")
+                print(f"    Adapter.Unit parent types checked: {sample_parent_types}")
+                print(f"    Sample compute MOIDs: {list(adapters_by_parent.keys())[:3]}")
         except Exception as e:
             print(f"    ⚠️  Adapter query failed: {e}")
 
@@ -689,17 +702,29 @@ def process_intersight_data(driver, mcp_url=None):
 
                     # Step 3: Get adapters for this server from pre-grouped dictionary
                     try:
-                        # Look up adapters by this server's MOID
+                        # Adapters are children of adapter.Unit objects, which belong to compute objects
+                        # PhysicalSummary.registered_device points to the actual compute object
+                        # Try looking up by both Summary MOID and RegisteredDevice MOID
                         server_adapters = adapters_by_parent.get(server_moid, [])
 
-                        # Debug: Show first few server MOIDs we're looking for
+                        # If not found, try registered_device MOID
+                        if not server_adapters:
+                            registered_device = getattr(server, 'registered_device', None)
+                            if registered_device:
+                                registered_device_moid = getattr(registered_device, 'moid', None)
+                                if registered_device_moid:
+                                    server_adapters = adapters_by_parent.get(registered_device_moid, [])
+
+                        # Debug: Show first few server MOIDs and check for registered_device reference
                         if counters["servers"] < 3:
                             server_obj_type = getattr(server, 'object_type', 'Unknown')
-                            print(f"    🔍 Server '{server_name}' (type: {server_obj_type}, MOID: {server_moid})")
-                            if server_moid in adapters_by_parent:
-                                print(f"       ✅ Found in dictionary with {len(server_adapters)} adapters")
+                            # PhysicalSummary objects reference the actual compute object
+                            registered_device = getattr(server, 'registered_device', None)
+                            if registered_device:
+                                registered_device_moid = getattr(registered_device, 'moid', None)
+                                print(f"    🔍 Server '{server_name}' Summary MOID: {server_moid}, RegisteredDevice MOID: {registered_device_moid}")
                             else:
-                                print(f"       ❌ Not found in dictionary")
+                                print(f"    🔍 Server '{server_name}' MOID: {server_moid}, no RegisteredDevice reference")
 
                         if len(server_adapters) > 0:
                             print(f"    📡 Found {len(server_adapters)} adapters for server '{server_name}'")
