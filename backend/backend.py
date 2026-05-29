@@ -1456,15 +1456,18 @@ async def query_intersight_with_llm(question: str, chat_history: str = "") -> tu
             question_lower = question.lower()
             candidate_tools = []
 
+            # Alarm queries (prioritize before generic health)
+            if "alarm" in question_lower:
+                candidate_tools = [t for t in tools if "alarm" in t.lower()]
+            # Health/telemetry queries (server health, metrics)
+            elif "health" in question_lower or "telemetry" in question_lower or "cpu" in question_lower or "memory" in question_lower or "temperature" in question_lower:
+                candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["health", "telemetry", "statistics"])]
             # Server/compute keywords
-            if "server" in question_lower or "ucs" in question_lower or "compute" in question_lower or "blade" in question_lower or "rack" in question_lower:
+            elif "server" in question_lower or "ucs" in question_lower or "compute" in question_lower or "blade" in question_lower or "rack" in question_lower:
                 candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["server", "compute", "blade", "rack"])]
             # Network adapter/vNIC keywords (for correlation)
             elif "mac" in question_lower or "vnic" in question_lower or "adapter" in question_lower:
                 candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["vnic", "adapter", "mac", "ethernet"])]
-            # Health/alarm keywords
-            elif "health" in question_lower or "alarm" in question_lower:
-                candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["alarm", "health", "telemetry"])]
             # Policy keywords
             elif "policy" in question_lower or "bios" in question_lower or "boot" in question_lower:
                 candidate_tools = [t for t in tools if "policy" in t.lower()]
@@ -1504,10 +1507,29 @@ Selected tool:"""
 
             print(f"🔧 Selected Intersight tool: {selected_tool}")
 
+            # Generate tool arguments based on question
+            tool_arguments = {}
+
+            # For list_alarms, add severity filter if mentioned
+            if selected_tool == "list_alarms":
+                if "critical" in question_lower:
+                    tool_arguments["filter"] = "Severity eq 'Critical'"
+                elif "warning" in question_lower:
+                    tool_arguments["filter"] = "Severity eq 'Warning'"
+                elif "info" in question_lower:
+                    tool_arguments["filter"] = "Severity eq 'Info'"
+
+            # For server queries with power state
+            elif "list_compute_servers" in selected_tool or "list_compute_blades" in selected_tool or "list_compute_rack_units" in selected_tool:
+                if "powered on" in question_lower or "running" in question_lower:
+                    tool_arguments["filter"] = "OperPowerState eq 'on'"
+                elif "powered off" in question_lower or "shutdown" in question_lower:
+                    tool_arguments["filter"] = "OperPowerState eq 'off'"
+
             # Execute tool
             execute_response = await client.post(
                 f"{INTERSIGHT_MCP_URL}/api/execute",
-                json={"tool": selected_tool, "arguments": {}},
+                json={"tool": selected_tool, "arguments": tool_arguments},
                 timeout=60.0
             )
 
