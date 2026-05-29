@@ -2,6 +2,7 @@ requests
 neo4j
 schedule
 intersight  # Cisco Intersight Python SDK for direct API access
+cryptography  # For key validation and format conversion
 
 # OpenTelemetry for APM tracing
 opentelemetry-api

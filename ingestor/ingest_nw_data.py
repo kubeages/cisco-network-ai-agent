@@ -473,51 +473,47 @@ def process_intersight_data(driver, mcp_url=None):
             # File path provided
             key_file_path = INTERSIGHT_API_SECRET_KEY
 
-        # Debug: Validate key with cryptography library first
-        print(f"  🔍 Validating private key...")
-        try:
-            from cryptography.hazmat.primitives import serialization
-            from cryptography.hazmat.backends import default_backend
+        # Debug: Validate and convert key format
+        print(f"  🔍 Validating and converting private key...")
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.backends import default_backend
+        from cryptography.hazmat.primitives.asymmetric import ec
 
-            with open(key_file_path, 'rb') as key_file:
-                key_data = key_file.read()
+        with open(key_file_path, 'rb') as key_file:
+            key_data = key_file.read()
 
-            # Try loading as EC key
-            try:
-                from cryptography.hazmat.primitives.asymmetric import ec
-                private_key = serialization.load_pem_private_key(
-                    key_data,
-                    password=None,
-                    backend=default_backend()
-                )
+        # Load the private key
+        private_key = serialization.load_pem_private_key(
+            key_data,
+            password=None,
+            backend=default_backend()
+        )
 
-                if isinstance(private_key, ec.EllipticCurvePrivateKey):
-                    print(f"  ✅ Valid EC private key detected")
-                    print(f"     Curve: {private_key.curve.name}")
-                    signing_algorithm = "ecdsa-sha256"
-                else:
-                    print(f"  ✅ Valid RSA private key detected")
-                    signing_algorithm = "rsa-sha256"
+        # Check key type and convert to PKCS8 format (SDK may prefer this)
+        if isinstance(private_key, ec.EllipticCurvePrivateKey):
+            print(f"  ✅ Valid EC private key detected")
+            print(f"     Curve: {private_key.curve.name}")
+            signing_algorithm = "ecdsa-sha256"
 
-            except Exception as e:
-                print(f"  ⚠️  Key validation warning: {e}")
-                # Fallback to header detection
-                with open(key_file_path, 'r') as f:
-                    key_content = f.read()
-                    if 'EC PRIVATE KEY' in key_content:
-                        signing_algorithm = "ecdsa-sha256"
-                    else:
-                        signing_algorithm = "rsa-sha256"
+            # Convert from SEC1 (BEGIN EC PRIVATE KEY) to PKCS8 (BEGIN PRIVATE KEY)
+            # SDK might prefer PKCS8 format
+            print(f"  🔄 Converting EC key from SEC1 to PKCS8 format...")
+            pkcs8_key = private_key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption()
+            )
 
-        except ImportError:
-            print(f"  ⚠️  Cryptography library not available for validation")
-            # Fallback to header detection
-            with open(key_file_path, 'r') as f:
-                key_content = f.read()
-                if 'EC PRIVATE KEY' in key_content:
-                    signing_algorithm = "ecdsa-sha256"
-                else:
-                    signing_algorithm = "rsa-sha256"
+            # Write converted key to new temp file
+            with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.pem') as f:
+                f.write(pkcs8_key)
+                key_file_path = f.name
+            print(f"  ✅ Key converted to PKCS8 format")
+
+        else:
+            print(f"  ✅ Valid RSA private key detected")
+            print(f"     Key size: {private_key.key_size} bits")
+            signing_algorithm = "rsa-sha256"
 
         print(f"  📝 Using signing algorithm: {signing_algorithm}")
 
