@@ -541,12 +541,16 @@ def process_intersight_data(driver, mcp_url=None):
         print(f"  📝 Using key file: {key_file_path}")
 
         # Create signing configuration
+        # Intersight API requires these specific headers to be signed
+        signed_headers = ["(request-target)", "host", "date", "digest"]
+
         signing_config = HttpSigningConfiguration(
             key_id=INTERSIGHT_API_KEY_ID,
             private_key_path=key_file_path,
             signing_scheme="hs2019",
             signing_algorithm=signing_algorithm,
-            hash_algorithm="sha256"
+            hash_algorithm="sha256",
+            signed_headers=signed_headers
         )
         print(f"  ✅ Signing configuration created successfully")
 
