@@ -630,6 +630,22 @@ def process_intersight_data(driver, mcp_url=None):
         except Exception as e:
             print(f"    ⚠️  Adapter query failed: {e}")
 
+        # Debug: Check sample ACI endpoint MACs to see format
+        print(f"  🔍 Checking sample ACI endpoint MACs in Neo4j...")
+        with driver.session() as db_session:
+            sample_macs_result = traced_neo4j_run(
+                db_session,
+                """
+                MATCH (e:Endpoint)
+                WHERE e.mac IS NOT NULL
+                RETURN e.mac AS mac
+                LIMIT 5
+                """,
+                "neo4j.sample_endpoint_macs"
+            )
+            sample_macs = [record["mac"] for record in sample_macs_result]
+            print(f"    Sample ACI endpoint MACs: {sample_macs}")
+
         with driver.session() as db_session:
             for server in servers:
                 try:
@@ -753,6 +769,10 @@ def process_intersight_data(driver, mcp_url=None):
                                 if mac_address and mac_address != "" and mac_address != "00:00:00:00:00:00":
                                     counters["vnics"] += 1
                                     adapter_name = getattr(adapter, 'name', 'Unknown')
+
+                                    # Debug: Show first few MACs we're trying to correlate
+                                    if counters["vnics"] <= 3:
+                                        print(f"      🔍 Trying to correlate MAC: {mac_address} (adapter: {adapter_name})")
 
                                     # Step 4: Correlate with ACI endpoints by MAC address
                                     correlation_result = traced_neo4j_run(
