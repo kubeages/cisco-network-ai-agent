@@ -217,7 +217,7 @@ def mark_data_source_availability(driver, apic_available, nd_available, intersig
         available=apic_available,
         timestamp=timestamp,
         description="Cisco APIC - ACI Policy Model",
-        provides="Tenants, EPGs, Contracts, Bridge Domains, VRFs"
+        provides="Tenants, EPGs, Contracts, Bridge Domains, VRFs, Endpoints (MAC/IP)"
         )
 
         # Mark ND availability
@@ -859,7 +859,7 @@ def get_apic_session(url, user, password):
 
 def process_apic_data(driver, session, url):
     sync_start_time = datetime.now(timezone.utc)
-    counters = {"tenant": 0, "vrf": 0, "bd": 0, "subnet": 0, "ap": 0, "epg": 0, "node": 0, "fault": 0}
+    counters = {"tenant": 0, "vrf": 0, "bd": 0, "subnet": 0, "ap": 0, "epg": 0, "node": 0, "fault": 0, "endpoint": 0}
 
     with driver.session() as db_session:
         # --- 1. Fetch Tenant hierarchy: Tenants, APs, EPGs, VRFs, BDs, Subnets ---
@@ -993,11 +993,70 @@ def process_apic_data(driver, session, url):
                         except (IndexError, KeyError):
                             pass
 
+        # --- 4. Fetch Endpoints (fvCEp - Client Endpoints) ---
+        endpoints_url = f"{url}/api/node/class/fvCEp.json"
+        print(f"▶️  Fetching APIC endpoints...")
+        endpoints_data = session.get(endpoints_url, verify=False).json().get("imdata", [])
+
+        if endpoints_data:
+            print(f"  - Received {len(endpoints_data)} endpoints")
+            counters["endpoint"] = 0
+            for item in endpoints_data:
+                if "fvCEp" in item:
+                    attrs = item["fvCEp"]["attributes"]
+                    mac = attrs.get("mac", "").upper()
+                    ip = attrs.get("ip", "0.0.0.0")
+                    name = attrs.get("name", "")
+                    dn = attrs.get("dn", "")
+
+                    # Skip if no MAC
+                    if not mac or mac == "00:00:00:00:00:00":
+                        continue
+
+                    # Extract tenant, AP, EPG from DN
+                    # DN format: uni/tn-<tenant>/ap-<ap>/epg-<epg>/cep-<mac>
+                    try:
+                        dn_parts = dn.split('/')
+                        tenant_name = None
+                        ap_name = None
+                        epg_name = None
+
+                        for part in dn_parts:
+                            if part.startswith('tn-'):
+                                tenant_name = part[3:]
+                            elif part.startswith('ap-'):
+                                ap_name = part[3:]
+                            elif part.startswith('epg-'):
+                                epg_name = part[4:]
+
+                        # Create Endpoint node and link to EPG
+                        if tenant_name and epg_name:
+                            db_session.run("""
+                                MERGE (ep:Endpoint {mac: $mac})
+                                SET ep.ip = $ip,
+                                    ep.name = $name,
+                                    ep.dn = $dn,
+                                    ep.tenant = $tenant,
+                                    ep.epg = $epg,
+                                    ep.lastSeen = $timestamp
+                                WITH ep
+                                MATCH (e:EPG {name: $epg, tenant: $tenant})
+                                MERGE (ep)-[:MEMBER_OF]->(e)
+                            """, mac=mac, ip=ip, name=name, dn=dn,
+                                 tenant=tenant_name, epg=epg_name, timestamp=sync_start_time)
+                            counters["endpoint"] += 1
+
+                    except (IndexError, KeyError) as e:
+                        # Skip malformed DNs
+                        pass
+
+            print(f"  - Created/updated {counters['endpoint']} endpoints with valid MACs")
+
         # --- Sweep old APIC objects ---
         print("\n▶️  Sweep (APIC): Deleting old objects...")
         result = db_session.run("""
             MATCH (n)
-            WHERE (n:Tenant OR n:AppProfile OR n:EPG OR n:VRF OR n:BridgeDomain OR n:Subnet OR n:Node OR n:Fault)
+            WHERE (n:Tenant OR n:AppProfile OR n:EPG OR n:VRF OR n:BridgeDomain OR n:Subnet OR n:Node OR n:Fault OR n:Endpoint)
             AND (n.lastSeen IS NULL OR n.lastSeen < $timestamp)
             DETACH DELETE n
             RETURN count(n) as deleted_count
