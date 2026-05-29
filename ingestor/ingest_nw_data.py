@@ -593,6 +593,7 @@ def process_intersight_data(driver, mcp_url=None):
                                 adapters_by_parent[parent_moid] = []
                             adapters_by_parent[parent_moid].append(adapter)
                 print(f"    Grouped adapters by {len(adapters_by_parent)} parent servers")
+                print(f"    Sample parent MOIDs: {list(adapters_by_parent.keys())[:3]}")
         except Exception as e:
             print(f"    ⚠️  Adapter query failed: {e}")
 
@@ -685,6 +686,14 @@ def process_intersight_data(driver, mcp_url=None):
                     try:
                         # Look up adapters by this server's MOID
                         server_adapters = adapters_by_parent.get(server_moid, [])
+
+                        # Debug: Show first few server MOIDs we're looking for
+                        if counters["servers"] < 3:
+                            print(f"    🔍 Looking for adapters with parent MOID: {server_moid} (server: {server_name})")
+                            if server_moid in adapters_by_parent:
+                                print(f"       ✅ Found in dictionary with {len(server_adapters)} adapters")
+                            else:
+                                print(f"       ❌ Not found in dictionary")
 
                         if len(server_adapters) > 0:
                             print(f"    📡 Found {len(server_adapters)} adapters for server '{server_name}'")
