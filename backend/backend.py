@@ -1547,13 +1547,46 @@ Selected tool:"""
                 details={"tool": selected_tool, "account": "CAI-NL"}
             )]
 
+            # Truncate result to fit token budget
+            MAX_INTERSIGHT_TOKENS = 4000
+            result_json = json.dumps(result, indent=2)
+
+            try:
+                encoding = tiktoken.get_encoding("cl100k_base")
+            except:
+                encoding = None
+
+            def count_tokens(text: str) -> int:
+                if encoding:
+                    return len(encoding.encode(text))
+                else:
+                    return len(text) // 4
+
+            result_tokens = count_tokens(result_json)
+            truncation_note = ""
+
+            if result_tokens > MAX_INTERSIGHT_TOKENS:
+                print(f"⚠️  Intersight result too large ({result_tokens} tokens), truncating to {MAX_INTERSIGHT_TOKENS}")
+
+                # Binary search to find truncation point
+                left, right = 0, len(result_json)
+                while left < right:
+                    mid = (left + right + 1) // 2
+                    if count_tokens(result_json[:mid]) <= MAX_INTERSIGHT_TOKENS:
+                        left = mid
+                    else:
+                        right = mid - 1
+
+                result_json = result_json[:left] + "\n... (truncated due to size)"
+                truncation_note = f"\n\nNote: Result truncated from {result_tokens} to ~{MAX_INTERSIGHT_TOKENS} tokens."
+
             # Synthesize answer from tool result
             synthesis_prompt = f"""Based on the following Cisco Intersight compute/server data, provide a clear answer to the question.
 
 Question: {question}
 
 Intersight Data:
-{json.dumps(result, indent=2)}
+{result_json}{truncation_note}
 
 Answer (be concise and focus on the key information):"""
 
