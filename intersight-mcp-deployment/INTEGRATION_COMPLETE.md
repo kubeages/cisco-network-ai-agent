@@ -325,22 +325,83 @@ oc logs -n gbaia deployment/intersight-mcp --tail=50
 
 ---
 
-## Next Steps
-
-### Phase 3: Neo4j Correlation (Planned)
+## Phase 3: MAC Correlation ✅ COMPLETE
 
 **Goal**: Link servers to network endpoints via MAC addresses
 
-**Implementation**:
-1. Extend ingestor to fetch Intersight inventory
-2. Query vNICs to get MAC addresses
-3. Match with ACI endpoint MACs
-4. Create `Server→CONNECTED_TO→EPG` relationships
+**Implementation** (Completed 2026-05-29):
+1. ✅ Extended ingestor to fetch Intersight inventory
+2. ✅ Query vNICs to get MAC addresses
+3. ✅ Match with ACI endpoint MACs in Neo4j
+4. ✅ Create `(IntersightServer)-[:CONNECTED_TO]->(Endpoint)` relationships
 
-**Queries Enabled**:
-- "Which servers are in EPG 'database-tier'?"
-- "Show me all infrastructure for AppProfile 'web-tier'"
-- "Are compute issues causing network problems in tenant X?"
+**What Was Built**:
+
+### Ingestor Changes (`ingestor/ingest_nw_data.py`):
+```python
+def process_intersight_data(driver, mcp_url):
+    # 1. Fetch servers from Intersight MCP
+    servers = call_intersight_mcp("list_compute_servers")
+    
+    # 2. For each server, create Neo4j node
+    for server in servers:
+        CREATE (s:IntersightServer {
+            moid, name, model, serial,
+            cpu_cores, memory_gb, power_state,
+            health, critical_alarms, warning_alarms
+        })
+        
+        # 3. Get vNICs with MAC addresses
+        vnics = call_intersight_mcp("list_vnics")
+        
+        # 4. Match MAC with endpoints
+        for vnic in vnics:
+            MATCH (e:Endpoint {mac: vnic.mac_address})
+            CREATE (s)-[:CONNECTED_TO {vnic_name}]->(e)
+```
+
+### Neo4j Schema Added:
+**Node: IntersightServer**
+- Properties: moid, name, model, serial, cpu_cores, memory_gb, power_state, health, critical_alarms, warning_alarms, first_seen, last_seen
+
+**Relationship: CONNECTED_TO**
+- From: IntersightServer
+- To: Endpoint
+- Properties: vnic_name, created, last_seen
+
+### Example Data Flow:
+```
+Intersight: Server "UCS-WEB-01" → vNIC "eth0" → MAC "00:25:B5:00:01:23"
+                                                    ↓
+Neo4j: (IntersightServer {name: "UCS-WEB-01"})-[:CONNECTED_TO]->(Endpoint {mac: "00:25:B5:00:01:23"})
+                                                    ↓
+       (Endpoint)-[:MEMBER_OF]->(EPG {name: "web-tier"})-[:PART_OF]->(AppProfile {name: "production"})
+```
+
+**Queries Now Enabled**:
+```cypher
+// Which servers are in EPG 'database-tier'?
+MATCH (s:IntersightServer)-[:CONNECTED_TO]->(e:Endpoint)-[:MEMBER_OF]->(epg:EPG {name: 'database-tier'})
+RETURN s.name, s.model, s.cpu_cores, s.memory_gb, s.health, e.ip
+
+// Show all infrastructure for AppProfile 'web-tier'
+MATCH (ap:AppProfile {name: 'web-tier'})-[:HAS_EPG]->(epg:EPG)
+OPTIONAL MATCH (s:IntersightServer)-[:CONNECTED_TO]->(e:Endpoint)-[:MEMBER_OF]->(epg)
+RETURN ap, epg, s, e
+
+// Which servers have critical health issues affecting network?
+MATCH (s:IntersightServer {health: 'Critical'})-[:CONNECTED_TO]->(e:Endpoint)-[:MEMBER_OF]->(epg:EPG)
+RETURN s.name, s.critical_alarms, epg.name, e.ip
+```
+
+**Operational Details**:
+- Runs as part of ingestor sync cycle (every 5 minutes)
+- Cleans up stale servers not seen in last sync
+- Tracks metrics: servers, vNICs, correlations
+- Logs each successful MAC correlation
+- Handles missing Intersight gracefully (continues with ACI/ND only)
+
+## Next Steps
 
 ### Phase 4: Hybrid Queries (Planned)
 
@@ -363,8 +424,8 @@ AI: "Network: EPG shows high packet loss (15%)
 - [✅] Queries classified correctly (intersight vs neo4j/mcp)
 - [✅] Tool selection working (keyword + LLM)
 - [✅] Answer synthesis from Intersight data
-- [⏳] End-to-end user testing (next)
-- [⏳] MAC correlation (Phase 3)
+- [✅] End-to-end user testing
+- [✅] MAC correlation (Phase 3) - COMPLETED
 - [⏳] Hybrid queries (Phase 4)
 
 ---
