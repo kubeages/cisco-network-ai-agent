@@ -460,41 +460,24 @@ def process_intersight_data(driver, mcp_url=None):
 
         # Configure HTTP signature authentication
         # API secret can be either PEM content or file path
+        import tempfile
+        import os as os_module
+
+        # Always use temp file for consistency
         if INTERSIGHT_API_SECRET_KEY.startswith("-----BEGIN"):
             # Direct PEM content - write to temp file
-            import tempfile
             with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.pem') as f:
                 f.write(INTERSIGHT_API_SECRET_KEY)
-                temp_key_file = f.name
-
-            signing_config = HttpSigningConfiguration(
-                key_id=INTERSIGHT_API_KEY_ID,
-                private_key_path=temp_key_file,
-                signing_scheme=HttpSigningConfiguration.SCHEME_HS2019,
-                signing_algorithm=HttpSigningConfiguration.ALGORITHM_RSASSA_PKCS1v15,
-                hash_algorithm=HttpSigningConfiguration.HASH_SHA256,
-                signed_headers=[
-                    HttpSigningConfiguration.HEADER_REQUEST_TARGET,
-                    HttpSigningConfiguration.HEADER_HOST,
-                    HttpSigningConfiguration.HEADER_DATE,
-                    HttpSigningConfiguration.HEADER_DIGEST,
-                ]
-            )
+                key_file_path = f.name
         else:
-            # File path
-            signing_config = HttpSigningConfiguration(
-                key_id=INTERSIGHT_API_KEY_ID,
-                private_key_path=INTERSIGHT_API_SECRET_KEY,
-                signing_scheme=HttpSigningConfiguration.SCHEME_HS2019,
-                signing_algorithm=HttpSigningConfiguration.ALGORITHM_RSASSA_PKCS1v15,
-                hash_algorithm=HttpSigningConfiguration.HASH_SHA256,
-                signed_headers=[
-                    HttpSigningConfiguration.HEADER_REQUEST_TARGET,
-                    HttpSigningConfiguration.HEADER_HOST,
-                    HttpSigningConfiguration.HEADER_DATE,
-                    HttpSigningConfiguration.HEADER_DIGEST,
-                ]
-            )
+            # File path provided
+            key_file_path = INTERSIGHT_API_SECRET_KEY
+
+        # Create signing configuration with minimal required parameters
+        signing_config = HttpSigningConfiguration(
+            key_id=INTERSIGHT_API_KEY_ID,
+            private_key_path=key_file_path
+        )
 
         config.signing_info = signing_config
 
