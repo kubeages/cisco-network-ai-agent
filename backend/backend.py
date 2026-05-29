@@ -492,6 +492,8 @@ CYPHER_GENERATION_TEMPLATE = """Generate a Cypher query. Output ONLY the query, 
 - Tenant -[:HAS_VRF]-> VRF (tenants have VRFs)
 - Tenant -[:HAS_BD]-> BridgeDomain (tenants have bridge domains)
 - BridgeDomain -[:HAS_SUBNET]-> Subnet (bridge domains have subnets)
+- IntersightServer -[:CONNECTED_TO]-> Endpoint (servers connect to network endpoints via MAC correlation)
+- Endpoint -[:MEMBER_OF]-> EPG (endpoints are members of EPGs)
 
 IMPORTANT: Severity values are ALWAYS lowercase: 'critical', 'major', 'warning', 'minor'
 
@@ -613,6 +615,49 @@ OPTIONAL MATCH (bd)-[:HAS_SUBNET]->(s:Subnet)
 OPTIONAL MATCH (t:Tenant)-[:HAS_BD]->(bd)
 RETURN bd.name AS bridge_domain, t.name AS tenant,
        collect(s.ip) AS subnet_ips, collect(s.scope) AS subnet_scopes
+
+EXAMPLE 16 - Query an entity when type is unknown:
+Question: "Tell me about 'TS-FI-1-8'"
+MATCH (n {{name: 'TS-FI-1-8'}})
+OPTIONAL MATCH (n)-[r]->(m)
+RETURN labels(n) AS entity_type, properties(n) AS entity_properties,
+       collect({{rel_type: type(r), target_label: labels(m)[0], target_name: m.name}}) AS relationships
+
+EXAMPLE 17 - IntersightServer with connected endpoints:
+Question: "Show me server 'TS-FI-1-4' and its network connections"
+MATCH (s:IntersightServer {{name: 'TS-FI-1-4'}})
+OPTIONAL MATCH (s)-[:CONNECTED_TO]->(e:Endpoint)
+OPTIONAL MATCH (e)-[:MEMBER_OF]->(epg:EPG)
+RETURN s.name AS server, s.model AS model, s.serial AS serial,
+       collect(DISTINCT e.mac) AS endpoint_macs,
+       collect(DISTINCT e.ip) AS endpoint_ips,
+       collect(DISTINCT epg.name) AS connected_epgs
+
+EXAMPLE 18 - All IntersightServers with correlation status:
+Question: "Show all servers and their network correlation status"
+MATCH (s:IntersightServer)
+OPTIONAL MATCH (s)-[:CONNECTED_TO]->(e:Endpoint)
+RETURN s.name AS server, s.model AS model,
+       count(e) AS connected_endpoints,
+       collect(e.mac) AS endpoint_macs
+ORDER BY connected_endpoints DESC
+
+EXAMPLE 19 - Endpoint with EPG membership:
+Question: "Tell me about endpoint with MAC '00:25:B5:56:65:46'"
+MATCH (e:Endpoint {{mac: '00:25:B5:56:65:46'}})
+OPTIONAL MATCH (e)-[:MEMBER_OF]->(epg:EPG)
+OPTIONAL MATCH (s:IntersightServer)-[:CONNECTED_TO]->(e)
+OPTIONAL MATCH (epg)<-[:HAS_EPG]-(ap:AppProfile)<-[:HAS_AP]-(t:Tenant)
+RETURN e.mac AS mac, e.ip AS ip, e.name AS endpoint_name,
+       epg.name AS epg, ap.name AS app_profile, t.name AS tenant,
+       s.name AS connected_server
+
+EXAMPLE 20 - Endpoints in a specific EPG:
+Question: "Show all endpoints in EPG 'nodes'"
+MATCH (e:Endpoint)-[:MEMBER_OF]->(epg:EPG {{name: 'nodes'}})
+OPTIONAL MATCH (s:IntersightServer)-[:CONNECTED_TO]->(e)
+RETURN e.mac AS mac, e.ip AS ip, s.name AS server
+ORDER BY e.ip
 
 Schema:
 {schema}
