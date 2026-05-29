@@ -466,15 +466,19 @@ def process_intersight_data(driver, mcp_url=None):
         # Always use temp file for consistency
         if INTERSIGHT_API_SECRET_KEY.startswith("-----BEGIN"):
             # Direct PEM content - write to temp file
+            # Environment variables may have literal \n instead of newlines
+            pem_content = INTERSIGHT_API_SECRET_KEY.replace('\\n', '\n')
             with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.pem') as f:
-                f.write(INTERSIGHT_API_SECRET_KEY)
+                f.write(pem_content)
                 key_file_path = f.name
+            print(f"  📝 Wrote PEM key to temp file: {key_file_path}")
         else:
             # File path provided
             key_file_path = INTERSIGHT_API_SECRET_KEY
+            print(f"  📁 Using key file: {key_file_path}")
 
-        # Debug: Validate and convert key format
-        print(f"  🔍 Validating and converting private key...")
+        # Debug: Validate key format
+        print(f"  🔍 Validating private key...")
         from cryptography.hazmat.primitives import serialization
         from cryptography.hazmat.backends import default_backend
         from cryptography.hazmat.primitives.asymmetric import ec
@@ -482,40 +486,33 @@ def process_intersight_data(driver, mcp_url=None):
         with open(key_file_path, 'rb') as key_file:
             key_data = key_file.read()
 
-        # Load the private key
-        private_key = serialization.load_pem_private_key(
-            key_data,
-            password=None,
-            backend=default_backend()
-        )
+        print(f"  📊 Key data length: {len(key_data)} bytes")
+        print(f"  🔤 First 30 chars: {key_data[:30]}")
 
-        # Check key type and convert to PKCS8 format (SDK may prefer this)
+        # Load the private key
+        try:
+            private_key = serialization.load_pem_private_key(
+                key_data,
+                password=None,
+                backend=default_backend()
+            )
+            print(f"  ✅ Key loaded successfully")
+        except Exception as e:
+            print(f"  ❌ Failed to load key: {e}")
+            raise
+
+        # Check key type and determine signing algorithm
         if isinstance(private_key, ec.EllipticCurvePrivateKey):
             print(f"  ✅ Valid EC private key detected")
             print(f"     Curve: {private_key.curve.name}")
             signing_algorithm = "ecdsa-sha256"
-
-            # Convert from SEC1 (BEGIN EC PRIVATE KEY) to PKCS8 (BEGIN PRIVATE KEY)
-            # SDK might prefer PKCS8 format
-            print(f"  🔄 Converting EC key from SEC1 to PKCS8 format...")
-            pkcs8_key = private_key.private_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PrivateFormat.PKCS8,
-                encryption_algorithm=serialization.NoEncryption()
-            )
-
-            # Write converted key to new temp file
-            with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.pem') as f:
-                f.write(pkcs8_key)
-                key_file_path = f.name
-            print(f"  ✅ Key converted to PKCS8 format")
-
         else:
             print(f"  ✅ Valid RSA private key detected")
             print(f"     Key size: {private_key.key_size} bits")
             signing_algorithm = "rsa-sha256"
 
         print(f"  📝 Using signing algorithm: {signing_algorithm}")
+        print(f"  📝 Using key file: {key_file_path}")
 
         # Try creating signing config with minimal parameters first
         try:
