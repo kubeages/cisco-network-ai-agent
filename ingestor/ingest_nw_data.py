@@ -473,10 +473,14 @@ def process_intersight_data(driver, mcp_url=None):
             # File path provided
             key_file_path = INTERSIGHT_API_SECRET_KEY
 
-        # Create signing configuration with minimal required parameters
+        # Create signing configuration with required parameters
+        # signing_scheme must be "hs2019" for Intersight
         signing_config = HttpSigningConfiguration(
             key_id=INTERSIGHT_API_KEY_ID,
-            private_key_path=key_file_path
+            private_key_path=key_file_path,
+            signing_scheme="hs2019",
+            signing_algorithm="rsa-sha256",
+            hash_algorithm="sha256"
         )
 
         config.signing_info = signing_config
