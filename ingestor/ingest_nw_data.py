@@ -583,35 +583,50 @@ def process_intersight_data(driver, mcp_url=None):
                 all_adapters = all_adapters_response.results
                 print(f"    Found {len(all_adapters)} total adapters in system")
 
-                # Group adapters by compute server MOID
-                # Hierarchy: compute.Blade/RackUnit → adapter.Unit → adapter.HostEthInterface
-                # We need to navigate from adapter → adapter.Unit (parent) → compute object
-                sample_parent_types = set()
+                # Group adapters by adapter.Unit MOID first (direct parent)
+                # We'll need to map adapter.Unit MOIDs to compute MOIDs separately
+                adapters_by_unit = {}
                 for adapter in all_adapters:
-                    # adapter.parent is adapter.Unit
                     adapter_unit = getattr(adapter, 'parent', None)
                     if adapter_unit:
-                        adapter_unit_type = getattr(adapter_unit, 'object_type', 'Unknown')
-                        if len(sample_parent_types) < 5:
-                            sample_parent_types.add(adapter_unit_type)
+                        unit_moid = getattr(adapter_unit, 'moid', None)
+                        if unit_moid:
+                            if unit_moid not in adapters_by_unit:
+                                adapters_by_unit[unit_moid] = []
+                            adapters_by_unit[unit_moid].append(adapter)
 
-                        # adapter.Unit should have a reference to the compute object
-                        # Try: compute_blade, compute_rack_unit, registered_device, or parent
-                        compute_ref = (getattr(adapter_unit, 'compute_blade', None) or
-                                      getattr(adapter_unit, 'compute_rack_unit', None) or
-                                      getattr(adapter_unit, 'registered_device', None) or
-                                      getattr(adapter_unit, 'parent', None))
+                print(f"    Grouped {len(all_adapters)} adapters by {len(adapters_by_unit)} adapter.Units")
 
-                        if compute_ref:
-                            compute_moid = getattr(compute_ref, 'moid', None)
-                            if compute_moid:
-                                if compute_moid not in adapters_by_parent:
-                                    adapters_by_parent[compute_moid] = []
-                                adapters_by_parent[compute_moid].append(adapter)
+                # Now query adapter.Unit objects to get their compute parent references
+                print(f"  📡 Querying adapter units to find compute mappings...")
+                try:
+                    from intersight.api import adapter_api as adapter_api_module
+                    # Reuse the same adapter_instance or create new one
+                    units_response = adapter_instance.get_adapter_unit_list()
+                    if units_response and hasattr(units_response, 'results'):
+                        units = units_response.results
+                        print(f"    Found {len(units)} adapter units")
 
-                print(f"    Grouped adapters by {len(adapters_by_parent)} compute servers")
-                print(f"    Adapter.Unit parent types checked: {sample_parent_types}")
-                print(f"    Sample compute MOIDs: {list(adapters_by_parent.keys())[:3]}")
+                        # Map adapter.Unit MOID → compute MOID
+                        for unit in units:
+                            unit_moid = getattr(unit, 'moid', None)
+                            # Try to find compute reference
+                            compute_ref = (getattr(unit, 'compute_blade', None) or
+                                          getattr(unit, 'compute_rack_unit', None) or
+                                          getattr(unit, 'registered_device', None))
+
+                            if unit_moid and compute_ref:
+                                compute_moid = getattr(compute_ref, 'moid', None)
+                                if compute_moid and unit_moid in adapters_by_unit:
+                                    # Transfer adapters from unit mapping to compute mapping
+                                    if compute_moid not in adapters_by_parent:
+                                        adapters_by_parent[compute_moid] = []
+                                    adapters_by_parent[compute_moid].extend(adapters_by_unit[unit_moid])
+
+                        print(f"    Mapped to {len(adapters_by_parent)} compute servers")
+                        print(f"    Sample compute MOIDs: {list(adapters_by_parent.keys())[:3]}")
+                except Exception as e:
+                    print(f"    ⚠️  Unit query failed: {e}")
         except Exception as e:
             print(f"    ⚠️  Adapter query failed: {e}")
 
