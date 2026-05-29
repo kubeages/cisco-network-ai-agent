@@ -81,6 +81,8 @@ NODE_COLORS = {
     "Node": "#c4b5fd",        # Lavender
     "Fault": "#fb923c",       # Orange
     "Advisory": "#fbbf24",    # Amber
+    "IntersightServer": "#ff1493", # Deep pink (servers stand out!)
+    "Endpoint": "#32cd32",    # Lime green (network endpoints)
     "Unknown": "#8b949e",     # Gray
 }
 
@@ -98,6 +100,8 @@ NODE_SHAPES = {
     "Node": "database",
     "Fault": "triangleDown",
     "Advisory": "star",
+    "IntersightServer": "box",  # Servers as boxes
+    "Endpoint": "dot",  # Endpoints as dots
     "Unknown": "dot",
 }
 
@@ -227,7 +231,12 @@ def generate_graph_html():
             color = NODE_COLORS.get(node_type, NODE_COLORS["Unknown"])
 
         # Size based on node type
-        size = 12 if node_type == "Fabric" else 10 if node_type in ["Tenant", "Node"] else 8 if node_type == "Anomaly" else 6
+        size = (14 if node_type == "IntersightServer" else   # Servers very visible
+                12 if node_type == "Fabric" else
+                10 if node_type in ["Tenant", "Node"] else
+                8 if node_type == "Anomaly" else
+                7 if node_type == "Endpoint" else
+                6)
 
         original_label = node.get("label", f"Node-{node['id']}")
         display_label = "Anomaly" if node_type == "Anomaly" else original_label
