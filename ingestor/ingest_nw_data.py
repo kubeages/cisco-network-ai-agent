@@ -468,6 +468,14 @@ def process_intersight_data(driver, mcp_url=None):
             # Direct PEM content - write to temp file
             # Environment variables may have literal \n instead of newlines
             pem_content = INTERSIGHT_API_SECRET_KEY.replace('\\n', '\n')
+
+            # IMPORTANT: Some keys are PKCS#8 format but have SEC1 headers (BEGIN EC PRIVATE KEY)
+            # Fix by normalizing to PKCS#8 headers if needed
+            if 'BEGIN EC PRIVATE KEY' in pem_content:
+                print(f"  🔧 Detected SEC1 header, converting to PKCS#8 header...")
+                pem_content = pem_content.replace('BEGIN EC PRIVATE KEY', 'BEGIN PRIVATE KEY')
+                pem_content = pem_content.replace('END EC PRIVATE KEY', 'END PRIVATE KEY')
+
             with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.pem') as f:
                 f.write(pem_content)
                 key_file_path = f.name
@@ -487,7 +495,6 @@ def process_intersight_data(driver, mcp_url=None):
             key_data = key_file.read()
 
         print(f"  📊 Key data length: {len(key_data)} bytes")
-        print(f"  🔤 First 30 chars: {key_data[:30]}")
 
         # Load the private key
         try:
