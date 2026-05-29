@@ -1531,8 +1531,13 @@ async def query_intersight_with_llm(question: str, chat_history: str = "") -> tu
                     # Prefer tools that can query a specific server
                     candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["get_server", "get_compute", "server_detail"])]
                     if not candidate_tools:
-                        # Fallback to list tools that can be filtered
-                        candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["list_compute_servers", "list_server"])]
+                        # Fallback to list tools that can be filtered (exclude profile tools for physical servers)
+                        candidate_tools = [t for t in tools if
+                                         any(kw in t.lower() for kw in ["list_compute_servers", "list_compute_physical", "list_rack", "list_blade"])
+                                         and "profile" not in t.lower()]
+                        if not candidate_tools:
+                            # Last resort: any compute tool except profiles
+                            candidate_tools = [t for t in tools if "compute" in t.lower() and "profile" not in t.lower()]
                 else:
                     candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["server", "compute", "blade", "rack"])]
             # Network adapter/vNIC keywords (for correlation)
