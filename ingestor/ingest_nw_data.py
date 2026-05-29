@@ -178,6 +178,10 @@ NEO4J_URI = os.getenv("NEO4J_URI")
 NEO4J_USER = os.getenv("NEO4J_USER")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
 
+# Intersight MCP configuration
+INTERSIGHT_MCP_ENABLED = os.getenv("INTERSIGHT_MCP_ENABLED", "true").lower() == "true"
+INTERSIGHT_MCP_URL = os.getenv("INTERSIGHT_MCP_URL", "http://intersight-mcp:3000")
+
 # Optional: Specify which ND fabric this APIC belongs to (for linking Tenants/Nodes)
 # If not set, will try to auto-detect or use first fabric
 APIC_FABRIC_NAME = os.getenv("APIC_FABRIC_NAME", "")
@@ -185,7 +189,7 @@ APIC_FABRIC_NAME = os.getenv("APIC_FABRIC_NAME", "")
 
 requests.urllib3.disable_warnings()
 
-def mark_data_source_availability(driver, apic_available, nd_available):
+def mark_data_source_availability(driver, apic_available, nd_available, intersight_available):
     """
     Create/update DataSource nodes in Neo4j to track availability.
     This allows the backend to adapt queries based on available data.
@@ -221,8 +225,23 @@ def mark_data_source_availability(driver, apic_available, nd_available):
         provides="Fabrics, Anomalies, Health Metrics, Compliance"
         )
 
+        # Mark Intersight availability
+        session.run("""
+            MERGE (ds:DataSource {name: 'intersight'})
+            SET ds.available = $available,
+                ds.last_check = $timestamp,
+                ds.description = $description,
+                ds.provides = $provides
+        """,
+        available=intersight_available,
+        timestamp=timestamp,
+        description="Cisco Intersight - Compute Infrastructure",
+        provides="UCS Servers, Health, Alarms, vNICs, MAC Addresses"
+        )
+
         print(f"  - APIC: {'✅ Available' if apic_available else '❌ Unavailable'}")
         print(f"  - Nexus Dashboard: {'✅ Available' if nd_available else '❌ Unavailable'}")
+        print(f"  - Intersight: {'✅ Available' if intersight_available else '❌ Unavailable'}")
 
 
 def run_ingestion_job():
@@ -258,6 +277,7 @@ def _execute_ingestion(parent_span):
     # Track which sources are available
     apic_available = False
     nd_available = False
+    intersight_available = False
 
     try:
         neo4j_driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
@@ -326,21 +346,63 @@ def _execute_ingestion(parent_span):
                 SYNC_ERRORS.labels(source="nexus_dashboard", error_type=type(e).__name__).inc()
                 SYNC_STATUS.labels(source="nexus_dashboard").set(0)
 
+        # === Intersight Data (Compute Infrastructure) ===
+        if INTERSIGHT_MCP_ENABLED:
+            intersight_start = time.time()
+            print("\n🖥️  Attempting Intersight MCP connection...")
+            try:
+                if ingestor_tracer:
+                    with ingestor_tracer.start_as_current_span(
+                        "process_intersight_data",
+                        kind=SpanKind.INTERNAL,
+                        attributes={"data.source": "intersight", "intersight.url": INTERSIGHT_MCP_URL}
+                    ):
+                        process_intersight_data(neo4j_driver, INTERSIGHT_MCP_URL)
+                else:
+                    process_intersight_data(neo4j_driver, INTERSIGHT_MCP_URL)
+
+                if METRICS_ENABLED:
+                    SYNC_DURATION.labels(source="intersight").observe(time.time() - intersight_start)
+                    LAST_SYNC_SUCCESS.labels(source="intersight").set(time.time())
+                    SYNC_STATUS.labels(source="intersight").set(1)
+
+                intersight_available = True
+                print("✅ Intersight data successfully ingested and correlated")
+            except Exception as e:
+                print(f"⚠️  Intersight processing failed: {e}")
+                if METRICS_ENABLED:
+                    SYNC_ERRORS.labels(source="intersight", error_type=type(e).__name__).inc()
+                    SYNC_STATUS.labels(source="intersight").set(0)
+        else:
+            print("\n🖥️  Intersight MCP disabled (set INTERSIGHT_MCP_ENABLED=true to enable)")
+
         # === Mark Data Source Availability in Neo4j ===
         print("\n📊 Updating data source availability...")
-        mark_data_source_availability(neo4j_driver, apic_available, nd_available)
+        mark_data_source_availability(neo4j_driver, apic_available, nd_available, intersight_available)
 
         neo4j_driver.close()
 
         # Determine completion status
-        if apic_available and nd_available:
-            print(f"\n✅ === FULL INGESTION COMPLETED (APIC + ND): {datetime.now()} === ✅")
-        elif nd_available:
-            print(f"\n✅ === PARTIAL INGESTION COMPLETED (ND ONLY): {datetime.now()} === ✅")
-            print("   Note: APIC unavailable - no policy model (EPG/Tenant) data")
-        elif apic_available:
-            print(f"\n✅ === PARTIAL INGESTION COMPLETED (APIC ONLY): {datetime.now()} === ✅")
-            print("   Note: ND unavailable - no operational/fabric data")
+        sources_available = sum([apic_available, nd_available, intersight_available])
+
+        if sources_available == 3:
+            print(f"\n✅ === FULL INGESTION COMPLETED (APIC + ND + Intersight): {datetime.now()} === ✅")
+        elif sources_available >= 2:
+            active = []
+            if apic_available: active.append("APIC")
+            if nd_available: active.append("ND")
+            if intersight_available: active.append("Intersight")
+            print(f"\n✅ === PARTIAL INGESTION COMPLETED ({' + '.join(active)}): {datetime.now()} === ✅")
+            if not apic_available: print("   Note: APIC unavailable - no policy model data")
+            if not nd_available: print("   Note: ND unavailable - no operational/fabric data")
+            if not intersight_available: print("   Note: Intersight unavailable - no compute/server data")
+        elif sources_available == 1:
+            if apic_available:
+                print(f"\n✅ === PARTIAL INGESTION COMPLETED (APIC ONLY): {datetime.now()} === ✅")
+            elif nd_available:
+                print(f"\n✅ === PARTIAL INGESTION COMPLETED (ND ONLY): {datetime.now()} === ✅")
+            else:
+                print(f"\n✅ === PARTIAL INGESTION COMPLETED (Intersight ONLY): {datetime.now()} === ✅")
         else:
             print(f"\n❌ === INGESTION FAILED: No data sources available === ❌")
 
@@ -356,6 +418,219 @@ def _execute_ingestion(parent_span):
         if parent_span:
             parent_span.set_status(Status(StatusCode.ERROR, str(e)))
             parent_span.record_exception(e)
+
+# --- FUNCTIONS FOR INTERSIGHT ---
+def process_intersight_data(driver, mcp_url):
+    """
+    Fetch server inventory from Intersight MCP and create relationships
+    with network endpoints based on MAC address correlation.
+    """
+    sync_start_time = datetime.now(timezone.utc)
+    counters = {
+        "servers": 0,
+        "vnics": 0,
+        "mac_correlations": 0,
+        "new_servers": 0,
+        "updated_servers": 0
+    }
+
+    print("  🖥️  Fetching server inventory from Intersight MCP...")
+
+    try:
+        # Step 1: Health check
+        health_response = requests.get(f"{mcp_url}/health", timeout=10)
+        if health_response.status_code != 200:
+            print(f"  ❌ Intersight MCP health check failed: {health_response.status_code}")
+            return
+
+        # Step 2: Get list of all compute servers
+        execute_url = f"{mcp_url}/api/execute"
+        servers_response = requests.post(
+            execute_url,
+            json={"tool": "list_compute_servers", "arguments": {}},
+            timeout=60
+        )
+
+        if servers_response.status_code != 200:
+            print(f"  ❌ Failed to fetch servers: {servers_response.status_code}")
+            return
+
+        servers_data = servers_response.json()
+        if not servers_data.get("success"):
+            print(f"  ❌ Intersight tool execution failed: {servers_data.get('error')}")
+            return
+
+        servers = servers_data.get("result", {}).get("Results", [])
+        print(f"  📊 Found {len(servers)} servers in Intersight")
+
+        with driver.session() as db_session:
+            for server in servers:
+                try:
+                    # Extract server information
+                    server_name = server.get("Name", "Unknown")
+                    server_moid = server.get("Moid")
+                    server_model = server.get("Model", "Unknown")
+                    server_serial = server.get("Serial", "")
+                    server_cpu_cores = server.get("NumCpus", 0)
+                    server_memory_gb = server.get("TotalMemory", 0) // 1024  # Convert MB to GB
+                    server_power_state = server.get("OperPowerState", "unknown")
+
+                    # Health status
+                    alarm_summary = server.get("AlarmSummary", {})
+                    critical_alarms = alarm_summary.get("Critical", 0)
+                    warning_alarms = alarm_summary.get("Warning", 0)
+
+                    if critical_alarms > 0:
+                        health_status = "Critical"
+                    elif warning_alarms > 0:
+                        health_status = "Warning"
+                    else:
+                        health_status = "Healthy"
+
+                    # Create or update IntersightServer node
+                    result = traced_neo4j_run(
+                        db_session,
+                        """
+                        MERGE (s:IntersightServer {moid: $moid})
+                        ON CREATE SET
+                            s.name = $name,
+                            s.model = $model,
+                            s.serial = $serial,
+                            s.cpu_cores = $cpu_cores,
+                            s.memory_gb = $memory_gb,
+                            s.power_state = $power_state,
+                            s.health = $health,
+                            s.critical_alarms = $critical_alarms,
+                            s.warning_alarms = $warning_alarms,
+                            s.first_seen = $timestamp,
+                            s.last_seen = $timestamp
+                        ON MATCH SET
+                            s.name = $name,
+                            s.model = $model,
+                            s.serial = $serial,
+                            s.cpu_cores = $cpu_cores,
+                            s.memory_gb = $memory_gb,
+                            s.power_state = $power_state,
+                            s.health = $health,
+                            s.critical_alarms = $critical_alarms,
+                            s.warning_alarms = $warning_alarms,
+                            s.last_seen = $timestamp
+                        RETURN s.name AS name,
+                               CASE WHEN s.first_seen = $timestamp THEN true ELSE false END AS is_new
+                        """,
+                        "neo4j.create_server",
+                        moid=server_moid,
+                        name=server_name,
+                        model=server_model,
+                        serial=server_serial,
+                        cpu_cores=server_cpu_cores,
+                        memory_gb=server_memory_gb,
+                        power_state=server_power_state,
+                        health=health_status,
+                        critical_alarms=critical_alarms,
+                        warning_alarms=warning_alarms,
+                        timestamp=sync_start_time
+                    )
+
+                    record = result.single()
+                    if record:
+                        counters["servers"] += 1
+                        if record["is_new"]:
+                            counters["new_servers"] += 1
+                        else:
+                            counters["updated_servers"] += 1
+
+                    # Step 3: Get vNICs for this server to extract MAC addresses
+                    vnics_response = requests.post(
+                        execute_url,
+                        json={"tool": "list_vnics", "arguments": {}},
+                        timeout=30
+                    )
+
+                    if vnics_response.status_code == 200:
+                        vnics_data = vnics_response.json()
+                        if vnics_data.get("success"):
+                            vnics = vnics_data.get("result", {}).get("Results", [])
+
+                            # Filter vNICs for this server by checking parent relationship
+                            for vnic in vnics:
+                                # Check if this vNIC belongs to current server
+                                compute_adapter = vnic.get("AdapterUnit", {})
+                                compute_blade = compute_adapter.get("ComputeBlade", {})
+
+                                # Match by server MOID
+                                if compute_blade.get("Moid") == server_moid:
+                                    mac_address = vnic.get("MacAddress", "").upper()
+
+                                    if mac_address and mac_address != "":
+                                        counters["vnics"] += 1
+
+                                        # Step 4: Correlate with ACI endpoints by MAC address
+                                        correlation_result = traced_neo4j_run(
+                                            db_session,
+                                            """
+                                            MATCH (s:IntersightServer {moid: $server_moid})
+                                            MATCH (e:Endpoint)
+                                            WHERE toUpper(e.mac) = $mac
+                                            MERGE (s)-[r:CONNECTED_TO]->(e)
+                                            ON CREATE SET r.created = $timestamp
+                                            SET r.last_seen = $timestamp,
+                                                r.vnic_name = $vnic_name
+                                            RETURN e.mac AS matched_mac, e.ip AS endpoint_ip
+                                            """,
+                                            "neo4j.correlate_mac",
+                                            server_moid=server_moid,
+                                            mac=mac_address,
+                                            vnic_name=vnic.get("Name", "Unknown"),
+                                            timestamp=sync_start_time
+                                        )
+
+                                        matched_records = list(correlation_result)
+                                        if matched_records:
+                                            counters["mac_correlations"] += len(matched_records)
+                                            for match in matched_records:
+                                                print(f"    ✅ Correlated: Server '{server_name}' ↔ MAC {mac_address} ↔ IP {match['endpoint_ip']}")
+
+                except Exception as server_error:
+                    print(f"  ⚠️  Error processing server {server.get('Name', 'Unknown')}: {server_error}")
+                    continue
+
+            # Clean up stale servers (not seen in this sync)
+            cleanup_result = traced_neo4j_run(
+                db_session,
+                """
+                MATCH (s:IntersightServer)
+                WHERE s.last_seen < $sync_start_time
+                DETACH DELETE s
+                RETURN count(s) AS deleted_count
+                """,
+                "neo4j.cleanup_stale_servers",
+                sync_start_time=sync_start_time
+            )
+
+            deleted = cleanup_result.single()["deleted_count"]
+            if deleted > 0:
+                print(f"  🗑️  Removed {deleted} stale servers")
+
+        # Print summary
+        print(f"\n  📊 Intersight Ingestion Summary:")
+        print(f"     - Servers processed: {counters['servers']} ({counters['new_servers']} new, {counters['updated_servers']} updated)")
+        print(f"     - vNICs found: {counters['vnics']}")
+        print(f"     - MAC correlations created: {counters['mac_correlations']}")
+
+        if METRICS_ENABLED:
+            RECORDS_SYNCED.labels(source="intersight", type="server").inc(counters["servers"])
+            RECORDS_SYNCED.labels(source="intersight", type="vnic").inc(counters["vnics"])
+            RECORDS_SYNCED.labels(source="intersight", type="correlation").inc(counters["mac_correlations"])
+
+    except requests.exceptions.RequestException as e:
+        print(f"  ❌ Intersight MCP connection error: {e}")
+        raise
+    except Exception as e:
+        print(f"  ❌ Intersight processing error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
 
 # --- FUNCTIONS FOR APIC ---
 def get_apic_session(url, user, password):
