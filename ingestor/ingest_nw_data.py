@@ -540,56 +540,57 @@ def process_intersight_data(driver, mcp_url):
                         else:
                             counters["updated_servers"] += 1
 
-                    # Step 3: Get vNICs for this server to extract MAC addresses
-                    vnics_response = requests.post(
+                    # Step 3: Get adapter host ethernet interfaces for this server to extract MAC addresses
+                    # Use search_resources to query adapter/HostEthInterfaces filtered by server MOID
+                    adapters_response = requests.post(
                         execute_url,
-                        json={"tool": "list_vnics", "arguments": {}},
+                        json={
+                            "tool": "search_resources",
+                            "arguments": {
+                                "resourceType": "adapter/HostEthInterfaces",
+                                "filter": f"RegisteredDevice/Moid eq '{server_moid}'"
+                            }
+                        },
                         timeout=30
                     )
 
-                    if vnics_response.status_code == 200:
-                        vnics_data = vnics_response.json()
-                        if vnics_data.get("success"):
-                            vnics = vnics_data.get("result", {}).get("Results", [])
+                    if adapters_response.status_code == 200:
+                        adapters_data = adapters_response.json()
+                        if adapters_data.get("success"):
+                            adapters = adapters_data.get("result", {}).get("Results", [])
 
-                            # Filter vNICs for this server by checking parent relationship
-                            for vnic in vnics:
-                                # Check if this vNIC belongs to current server
-                                compute_adapter = vnic.get("AdapterUnit", {})
-                                compute_blade = compute_adapter.get("ComputeBlade", {})
+                            # Process each ethernet interface
+                            for adapter in adapters:
+                                mac_address = adapter.get("MacAddress", "").upper()
 
-                                # Match by server MOID
-                                if compute_blade.get("Moid") == server_moid:
-                                    mac_address = vnic.get("MacAddress", "").upper()
+                                if mac_address and mac_address != "" and mac_address != "00:00:00:00:00:00":
+                                    counters["vnics"] += 1
 
-                                    if mac_address and mac_address != "":
-                                        counters["vnics"] += 1
+                                    # Step 4: Correlate with ACI endpoints by MAC address
+                                    correlation_result = traced_neo4j_run(
+                                        db_session,
+                                        """
+                                        MATCH (s:IntersightServer {moid: $server_moid})
+                                        MATCH (e:Endpoint)
+                                        WHERE toUpper(e.mac) = $mac
+                                        MERGE (s)-[r:CONNECTED_TO]->(e)
+                                        ON CREATE SET r.created = $timestamp
+                                        SET r.last_seen = $timestamp,
+                                            r.interface_name = $interface_name
+                                        RETURN e.mac AS matched_mac, e.ip AS endpoint_ip
+                                        """,
+                                        "neo4j.correlate_mac",
+                                        server_moid=server_moid,
+                                        mac=mac_address,
+                                        interface_name=adapter.get("Name", "Unknown"),
+                                        timestamp=sync_start_time
+                                    )
 
-                                        # Step 4: Correlate with ACI endpoints by MAC address
-                                        correlation_result = traced_neo4j_run(
-                                            db_session,
-                                            """
-                                            MATCH (s:IntersightServer {moid: $server_moid})
-                                            MATCH (e:Endpoint)
-                                            WHERE toUpper(e.mac) = $mac
-                                            MERGE (s)-[r:CONNECTED_TO]->(e)
-                                            ON CREATE SET r.created = $timestamp
-                                            SET r.last_seen = $timestamp,
-                                                r.vnic_name = $vnic_name
-                                            RETURN e.mac AS matched_mac, e.ip AS endpoint_ip
-                                            """,
-                                            "neo4j.correlate_mac",
-                                            server_moid=server_moid,
-                                            mac=mac_address,
-                                            vnic_name=vnic.get("Name", "Unknown"),
-                                            timestamp=sync_start_time
-                                        )
-
-                                        matched_records = list(correlation_result)
-                                        if matched_records:
-                                            counters["mac_correlations"] += len(matched_records)
-                                            for match in matched_records:
-                                                print(f"    ✅ Correlated: Server '{server_name}' ↔ MAC {mac_address} ↔ IP {match['endpoint_ip']}")
+                                    matched_records = list(correlation_result)
+                                    if matched_records:
+                                        counters["mac_correlations"] += len(matched_records)
+                                        for match in matched_records:
+                                            print(f"    ✅ Correlated: Server '{server_name}' ↔ MAC {mac_address} ↔ IP {match['endpoint_ip']}")
 
                 except Exception as server_error:
                     print(f"  ⚠️  Error processing server {server.get('Name', 'Unknown')}: {server_error}")
