@@ -1163,23 +1163,27 @@ async def query_mcp_with_llm(question: str, chat_history: str = "") -> tuple[str
         # Keyword-based filtering to narrow down candidates
         candidate_tools = []
 
-        if "health" in question_lower or "status" in question_lower:
-            # Search ALL tools for health/status (not just first 10!)
-            # Prioritize fabric/site health over compliance
-            health_keywords = ["health", "status", "fabric", "site", "device"]
-            for keyword in health_keywords:
-                matches = [t for t in tools if keyword in t.lower() and "compliance" not in t.lower()]
-                candidate_tools.extend(matches)
-                if len(candidate_tools) >= 10:
-                    break
-        elif "anomal" in question_lower:
+        # Check for specific queries BEFORE generic ones to avoid wrong tool selection
+        if "anomal" in question_lower:
+            # Anomaly queries - prioritize anomaly tools
             candidate_tools = [t for t in tools if "anomal" in t.lower()]
+        elif "fault" in question_lower:
+            # Fault queries
+            candidate_tools = [t for t in tools if "fault" in t.lower()]
         elif "compliance" in question_lower:
             candidate_tools = [t for t in tools if "compliance" in t.lower()]
         elif "bandwidth" in question_lower or "traffic" in question_lower:
             candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["bandwidth", "traffic", "flow", "interface"])]
         elif "cpu" in question_lower or "memory" in question_lower:
             candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["cpu", "memory", "resource", "utilization"])]
+        elif "health" in question_lower or "status" in question_lower:
+            # Generic health/status queries (fallback after specific checks)
+            health_keywords = ["health", "status", "fabric", "site", "device"]
+            for keyword in health_keywords:
+                matches = [t for t in tools if keyword in t.lower() and "compliance" not in t.lower()]
+                candidate_tools.extend(matches)
+                if len(candidate_tools) >= 10:
+                    break
 
         # Remove duplicates while preserving order
         seen = set()
