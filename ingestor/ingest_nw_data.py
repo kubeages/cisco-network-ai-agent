@@ -451,30 +451,52 @@ def process_intersight_data(driver, mcp_url=None):
         # Initialize Intersight API client with SDK
         from intersight.api_client import ApiClient
         from intersight.configuration import Configuration
+        from intersight.signing import HttpSigningConfiguration
         from intersight.api import compute_api, adapter_api
 
         # Configure API client
         config = Configuration()
         config.host = INTERSIGHT_BASE_URL
 
-        # Handle API key authentication
+        # Configure HTTP signature authentication
         # API secret can be either PEM content or file path
         if INTERSIGHT_API_SECRET_KEY.startswith("-----BEGIN"):
-            # Direct PEM content
-            config.signing_info = {
-                "signing_algorithm": "rsa-sha256",
-                "signing_scheme": "hs2019",
-                "key_id": INTERSIGHT_API_KEY_ID,
-                "private_key_data": INTERSIGHT_API_SECRET_KEY
-            }
+            # Direct PEM content - write to temp file
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.pem') as f:
+                f.write(INTERSIGHT_API_SECRET_KEY)
+                temp_key_file = f.name
+
+            signing_config = HttpSigningConfiguration(
+                key_id=INTERSIGHT_API_KEY_ID,
+                private_key_path=temp_key_file,
+                signing_scheme=HttpSigningConfiguration.SCHEME_HS2019,
+                signing_algorithm=HttpSigningConfiguration.ALGORITHM_RSASSA_PKCS1v15,
+                hash_algorithm=HttpSigningConfiguration.HASH_SHA256,
+                signed_headers=[
+                    HttpSigningConfiguration.HEADER_REQUEST_TARGET,
+                    HttpSigningConfiguration.HEADER_HOST,
+                    HttpSigningConfiguration.HEADER_DATE,
+                    HttpSigningConfiguration.HEADER_DIGEST,
+                ]
+            )
         else:
             # File path
-            config.signing_info = {
-                "signing_algorithm": "rsa-sha256",
-                "signing_scheme": "hs2019",
-                "key_id": INTERSIGHT_API_KEY_ID,
-                "private_key_path": INTERSIGHT_API_SECRET_KEY
-            }
+            signing_config = HttpSigningConfiguration(
+                key_id=INTERSIGHT_API_KEY_ID,
+                private_key_path=INTERSIGHT_API_SECRET_KEY,
+                signing_scheme=HttpSigningConfiguration.SCHEME_HS2019,
+                signing_algorithm=HttpSigningConfiguration.ALGORITHM_RSASSA_PKCS1v15,
+                hash_algorithm=HttpSigningConfiguration.HASH_SHA256,
+                signed_headers=[
+                    HttpSigningConfiguration.HEADER_REQUEST_TARGET,
+                    HttpSigningConfiguration.HEADER_HOST,
+                    HttpSigningConfiguration.HEADER_DATE,
+                    HttpSigningConfiguration.HEADER_DIGEST,
+                ]
+            )
+
+        config.signing_info = signing_config
 
         api_client = ApiClient(config)
         compute_instance = compute_api.ComputeApi(api_client)
