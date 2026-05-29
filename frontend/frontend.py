@@ -477,6 +477,16 @@ def generate_graph_html():
                     <circle cx="8" cy="8" r="6" fill="#00c9b7"/>
                 </svg>EPG
             </div>
+            <div class="legend-item" data-type="IntersightServer">
+                <svg width="16" height="16" viewBox="0 0 16 16" class="legend-shape">
+                    <rect x="2" y="3" width="12" height="10" rx="1" fill="#ff1493"/>
+                </svg>Server
+            </div>
+            <div class="legend-item" data-type="Endpoint">
+                <svg width="16" height="16" viewBox="0 0 16 16" class="legend-shape">
+                    <circle cx="8" cy="8" r="5" fill="#32cd32"/>
+                </svg>Endpoint
+            </div>
             <div class="legend-item inactive" data-type="Orphans" id="orphans-toggle">
                 <svg width="16" height="16" viewBox="0 0 16 16" class="legend-shape">
                     <circle cx="8" cy="8" r="5" fill="none" stroke="#8b949e" stroke-width="2" stroke-dasharray="2,2"/>
