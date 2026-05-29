@@ -1135,8 +1135,7 @@ def classify_query_intent(question: str) -> str:
     intersight_keywords = [
         "server", "ucs", "compute", "blade", "rack unit", "chassis",
         "fabric interconnect", "hyperflex", "vnic", "adapter",
-        "server health", "server alarm", "server cpu", "server memory",
-        "ts-fi", "fi-ntx"  # Server name patterns
+        "server health", "server alarm", "server cpu", "server memory"
     ]
 
     # Check for Intersight keywords first (most specific)
