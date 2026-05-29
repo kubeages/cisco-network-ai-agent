@@ -344,6 +344,10 @@ MCP_ENABLED = os.getenv("MCP_ENABLED", "false").lower() == "true"
 MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "")
 MCP_TOKEN = os.getenv("MCP_TOKEN", "")
 
+# --- Intersight MCP Configuration ---
+INTERSIGHT_MCP_ENABLED = os.getenv("INTERSIGHT_MCP_ENABLED", "true").lower() == "true"
+INTERSIGHT_MCP_URL = os.getenv("INTERSIGHT_MCP_URL", "http://intersight-mcp:3000")
+
 # --- Runtime Configuration ---
 from runtime_config import init_runtime_config, get_runtime_config
 
@@ -1058,10 +1062,23 @@ def classify_query_intent(question: str) -> str:
 
     Returns:
         "neo4j" - Static topology, relationships, historical data
-        "mcp" - Live metrics, current status, real-time data
+        "mcp" - Live metrics, current status, real-time data (network)
+        "intersight" - Compute/server data from Cisco Intersight
         "hybrid" - Requires both sources
     """
     question_lower = question.lower()
+
+    # Keywords indicating Intersight/compute queries
+    intersight_keywords = [
+        "server", "ucs", "compute", "blade", "rack unit", "chassis",
+        "fabric interconnect", "hyperflex", "vnic", "adapter",
+        "server health", "server alarm", "server cpu", "server memory"
+    ]
+
+    # Check for Intersight keywords first (most specific)
+    if INTERSIGHT_MCP_ENABLED and any(keyword in question_lower for keyword in intersight_keywords):
+        print(f"🖥️  Intersight query detected")
+        return "intersight"
 
     # Keywords indicating live/real-time data (MCP)
     live_keywords = [
@@ -1408,6 +1425,128 @@ Answer:"""
         return (f"Error querying real-time data: {str(e)}", [])
 
 
+async def query_intersight_with_llm(question: str, chat_history: str = "") -> tuple[str, List[DataSource]]:
+    """
+    Query Cisco Intersight for compute/server information via MCP HTTP server.
+
+    Returns:
+        Tuple of (answer text, list of data sources)
+    """
+    if not INTERSIGHT_MCP_ENABLED:
+        return ("Intersight integration is not enabled.", [])
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            # Check health
+            health_response = await client.get(f"{INTERSIGHT_MCP_URL}/health")
+            if health_response.status_code != 200:
+                return ("Intersight MCP server is not available.", [])
+
+            # Get available tools
+            tools_response = await client.get(f"{INTERSIGHT_MCP_URL}/api/tools")
+            tools_data = tools_response.json()
+            tools = [t["name"] for t in tools_data.get("tools", [])]
+
+            if not tools:
+                return ("No Intersight tools available.", [])
+
+            print(f"🔧 Intersight MCP: {len(tools)} tools available")
+
+            # Keyword-based tool selection
+            question_lower = question.lower()
+            candidate_tools = []
+
+            # Server/compute keywords
+            if "server" in question_lower or "ucs" in question_lower or "compute" in question_lower or "blade" in question_lower or "rack" in question_lower:
+                candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["server", "compute", "blade", "rack"])]
+            # Network adapter/vNIC keywords (for correlation)
+            elif "mac" in question_lower or "vnic" in question_lower or "adapter" in question_lower:
+                candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["vnic", "adapter", "mac", "ethernet"])]
+            # Health/alarm keywords
+            elif "health" in question_lower or "alarm" in question_lower:
+                candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["alarm", "health", "telemetry"])]
+            # Policy keywords
+            elif "policy" in question_lower or "bios" in question_lower or "boot" in question_lower:
+                candidate_tools = [t for t in tools if "policy" in t.lower()]
+            else:
+                # Default: list servers
+                candidate_tools = [t for t in tools if "list" in t.lower() and "server" in t.lower()]
+
+            if not candidate_tools:
+                candidate_tools = tools[:5]  # Fallback to first 5 tools
+
+            # Use LLM to select best tool
+            if len(candidate_tools) > 1:
+                tool_selection_prompt = f"""Select the most relevant Cisco Intersight tool to answer the question.
+
+Question: {question}
+
+Available tools:
+{chr(10).join(f"{i+1}. {t}" for i, t in enumerate(candidate_tools[:10]))}
+
+Return only the tool name, nothing else.
+Selected tool:"""
+
+                selection_response = qa_llm.invoke(tool_selection_prompt)
+                selected_tool_text = selection_response.content if hasattr(selection_response, 'content') else str(selection_response)
+
+                # Parse tool name
+                selected_tool = None
+                for tool in candidate_tools:
+                    if tool in selected_tool_text:
+                        selected_tool = tool
+                        break
+
+                if not selected_tool:
+                    selected_tool = candidate_tools[0]
+            else:
+                selected_tool = candidate_tools[0]
+
+            print(f"🔧 Selected Intersight tool: {selected_tool}")
+
+            # Execute tool
+            execute_response = await client.post(
+                f"{INTERSIGHT_MCP_URL}/api/execute",
+                json={"tool": selected_tool, "arguments": {}},
+                timeout=60.0
+            )
+
+            if execute_response.status_code != 200:
+                error_text = execute_response.text
+                print(f"❌ Intersight tool execution failed: {error_text}")
+                return (f"Failed to execute Intersight tool: {error_text}", [])
+
+            result = execute_response.json()
+
+            # Track data source
+            sources = [DataSource(
+                type="intersight",
+                description=f"Cisco Intersight compute data from {selected_tool}",
+                details={"tool": selected_tool, "account": "CAI-NL"}
+            )]
+
+            # Synthesize answer from tool result
+            synthesis_prompt = f"""Based on the following Cisco Intersight compute/server data, provide a clear answer to the question.
+
+Question: {question}
+
+Intersight Data:
+{json.dumps(result, indent=2)}
+
+Answer (be concise and focus on the key information):"""
+
+            qa_response = qa_llm.invoke(synthesis_prompt)
+            answer = qa_response.content if hasattr(qa_response, 'content') else str(qa_response)
+
+            return (answer, sources)
+
+    except Exception as e:
+        print(f"❌ Intersight query error: {e}")
+        import traceback
+        traceback.print_exc()
+        return (f"Error querying Intersight: {str(e)}", [])
+
+
 async def query_hybrid(question: str, chat_history: str = "") -> tuple[str, List[DataSource]]:
     """
     Execute hybrid query using both Neo4j and MCP.
@@ -1523,7 +1662,12 @@ async def ask_agent(query: Query):
     print(f"🔍 Query classified as: {query_intent}")
 
     try:
-        if query_intent == "mcp":
+        if query_intent == "intersight":
+            # Intersight-only query (compute/server data)
+            print("🖥️  Executing Intersight query...")
+            answer, data_sources = await query_intersight_with_llm(query.question, history_str)
+
+        elif query_intent == "mcp":
             # MCP-only query (live data)
             print("🔌 Executing MCP-only query...")
             answer, data_sources = await query_mcp_with_llm(query.question, history_str)
@@ -1690,7 +1834,20 @@ async def ask_agent_stream(query: Query):
 
         try:
             # Route based on query intent
-            if query_intent == "mcp":
+            if query_intent == "intersight":
+                # Intersight-only query (compute/server data)
+                yield f"data: {json.dumps({'status': 'routing', 'message': '🖥️  Routing to Intersight for compute data...'})}\n\n"
+                await asyncio.sleep(0.1)
+
+                yield f"data: {json.dumps({'status': 'fetching', 'message': '📡 Fetching server data from Cisco Intersight...'})}\n\n"
+                await asyncio.sleep(0.1)
+
+                answer, data_sources = await query_intersight_with_llm(query.question, history_str)
+
+                yield f"data: {json.dumps({'status': 'synthesizing', 'message': '🤖 Generating response...'})}\n\n"
+                await asyncio.sleep(0.1)
+
+            elif query_intent == "mcp":
                 # MCP-only query (live data)
                 yield f"data: {json.dumps({'status': 'routing', 'message': '🔌 Routing to MCP for live data...'})}\n\n"
                 await asyncio.sleep(0.1)
