@@ -571,16 +571,30 @@ def process_intersight_data(driver, mcp_url=None):
         servers = servers_response.results
         print(f"  📊 Found {len(servers)} servers in Intersight")
 
-        # Test: Query all adapters without filter to see if any exist
-        print(f"  🔍 Testing adapter query (first 10)...")
+        # Query ALL adapters once (more efficient than per-server queries)
+        # Then match them to servers by parent MOID in Python
+        print(f"  📡 Querying all adapter host ethernet interfaces...")
+        all_adapters = []
+        adapters_by_parent = {}
         try:
-            test_adapters = adapter_instance.get_adapter_host_eth_interface_list(top=10)
-            if test_adapters and hasattr(test_adapters, 'results'):
-                print(f"    Total adapters in system: {len(test_adapters.results)} (showing first 10)")
-                for tadapter in test_adapters.results[:3]:
-                    print(f"      - {getattr(tadapter, 'name', 'N/A')}, MAC: {getattr(tadapter, 'mac_address', 'N/A')}, Parent: {getattr(getattr(tadapter, 'parent', None), 'moid', 'N/A')}")
+            # Query without filter to get all adapters
+            all_adapters_response = adapter_instance.get_adapter_host_eth_interface_list()
+            if all_adapters_response and hasattr(all_adapters_response, 'results'):
+                all_adapters = all_adapters_response.results
+                print(f"    Found {len(all_adapters)} total adapters in system")
+
+                # Group adapters by parent MOID for efficient lookup
+                for adapter in all_adapters:
+                    parent = getattr(adapter, 'parent', None)
+                    if parent:
+                        parent_moid = getattr(parent, 'moid', None)
+                        if parent_moid:
+                            if parent_moid not in adapters_by_parent:
+                                adapters_by_parent[parent_moid] = []
+                            adapters_by_parent[parent_moid].append(adapter)
+                print(f"    Grouped adapters by {len(adapters_by_parent)} parent servers")
         except Exception as e:
-            print(f"    ⚠️  Test query failed: {e}")
+            print(f"    ⚠️  Adapter query failed: {e}")
 
         with driver.session() as db_session:
             for server in servers:
@@ -667,20 +681,16 @@ def process_intersight_data(driver, mcp_url=None):
                         else:
                             counters["updated_servers"] += 1
 
-                    # Step 3: Get adapter host ethernet interfaces for this server using SDK
-                    # Query adapter.HostEthInterface filtered by parent compute blade/rack unit
+                    # Step 3: Get adapters for this server from pre-grouped dictionary
                     try:
-                        # Filter: Parent/Moid eq 'server_moid'
-                        filter_str = f"Parent/Moid eq '{server_moid}'"
-                        adapters_response = adapter_instance.get_adapter_host_eth_interface_list(filter=filter_str)
+                        # Look up adapters by this server's MOID
+                        server_adapters = adapters_by_parent.get(server_moid, [])
 
-                        if adapters_response and hasattr(adapters_response, 'results'):
-                            adapters = adapters_response.results
-                            if len(adapters) > 0:
-                                print(f"    📡 Found {len(adapters)} adapters for server '{server_name}'")
+                        if len(server_adapters) > 0:
+                            print(f"    📡 Found {len(server_adapters)} adapters for server '{server_name}'")
 
-                            # Process each ethernet interface
-                            for adapter in adapters:
+                        # Process each ethernet interface
+                        for adapter in server_adapters:
                                 mac_address = getattr(adapter, 'mac_address', '')
                                 if mac_address:
                                     mac_address = mac_address.upper()
