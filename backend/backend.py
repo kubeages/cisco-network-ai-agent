@@ -1113,16 +1113,35 @@ def classify_query_intent(question: str) -> str:
     """
     question_lower = question.lower()
 
+    # Extract quoted entity names (e.g., 'TS-FI-1-1', "server-01")
+    import re
+    quoted_entities = re.findall(r"['\"]([^'\"]+)['\"]", question)
+
+    # Check if any quoted entity is an IntersightServer in Neo4j
+    if INTERSIGHT_MCP_ENABLED and quoted_entities:
+        try:
+            for entity_name in quoted_entities:
+                result = graph.query(
+                    "MATCH (n:IntersightServer {name: $name}) RETURN labels(n) AS labels LIMIT 1",
+                    params={"name": entity_name}
+                )
+                if result:
+                    print(f"🖥️  Intersight query detected (entity '{entity_name}' is IntersightServer)")
+                    return "intersight"
+        except Exception as e:
+            print(f"⚠️ Error checking entity type: {e}")
+
     # Keywords indicating Intersight/compute queries
     intersight_keywords = [
         "server", "ucs", "compute", "blade", "rack unit", "chassis",
         "fabric interconnect", "hyperflex", "vnic", "adapter",
-        "server health", "server alarm", "server cpu", "server memory"
+        "server health", "server alarm", "server cpu", "server memory",
+        "ts-fi", "fi-ntx"  # Server name patterns
     ]
 
     # Check for Intersight keywords first (most specific)
     if INTERSIGHT_MCP_ENABLED and any(keyword in question_lower for keyword in intersight_keywords):
-        print(f"🖥️  Intersight query detected")
+        print(f"🖥️  Intersight query detected (keyword match)")
         return "intersight"
 
     # Keywords indicating live/real-time data (MCP)
