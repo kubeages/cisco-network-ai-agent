@@ -512,7 +512,9 @@ def process_intersight_data(driver, mcp_url=None):
         if isinstance(private_key, ec.EllipticCurvePrivateKey):
             print(f"  ✅ Valid EC private key detected")
             print(f"     Curve: {private_key.curve.name}")
-            signing_algorithm = "ecdsa-sha256"
+            # Intersight SDK uses PyCryptodome and expects specific algorithm names:
+            # 'fips-186-3' or 'deterministic-rfc6979' for EC keys
+            signing_algorithm = "fips-186-3"
 
             # Intersight SDK expects EC keys in SEC1 format (BEGIN EC PRIVATE KEY)
             # Convert from PKCS#8 back to SEC1 for SDK compatibility
@@ -532,35 +534,21 @@ def process_intersight_data(driver, mcp_url=None):
         else:
             print(f"  ✅ Valid RSA private key detected")
             print(f"     Key size: {private_key.key_size} bits")
-            signing_algorithm = "rsa-sha256"
+            # Intersight SDK expects 'RSASSA-PSS' or 'RSASSA-PKCS1-v1_5' for RSA keys
+            signing_algorithm = "RSASSA-PSS"
 
         print(f"  📝 Using signing algorithm: {signing_algorithm}")
         print(f"  📝 Using key file: {key_file_path}")
 
-        # Try creating signing config with minimal parameters first
-        try:
-            signing_config = HttpSigningConfiguration(
-                key_id=INTERSIGHT_API_KEY_ID,
-                private_key_path=key_file_path,
-                signing_scheme="hs2019",
-                signing_algorithm=signing_algorithm,
-                hash_algorithm="sha256"
-            )
-        except Exception as e:
-            print(f"  ⚠️  Signing config failed with {signing_algorithm}, trying alternative...")
-            # If ecdsa-sha256 fails, try rsassa-pkcs-sha256 (some SDK versions use different names)
-            if signing_algorithm == "ecdsa-sha256":
-                signing_algorithm = "rsassa-pkcs-sha256"
-            else:
-                signing_algorithm = "ecdsa-sha256"
-            print(f"  🔄 Retrying with: {signing_algorithm}")
-            signing_config = HttpSigningConfiguration(
-                key_id=INTERSIGHT_API_KEY_ID,
-                private_key_path=key_file_path,
-                signing_scheme="hs2019",
-                signing_algorithm=signing_algorithm,
-                hash_algorithm="sha256"
-            )
+        # Create signing configuration
+        signing_config = HttpSigningConfiguration(
+            key_id=INTERSIGHT_API_KEY_ID,
+            private_key_path=key_file_path,
+            signing_scheme="hs2019",
+            signing_algorithm=signing_algorithm,
+            hash_algorithm="sha256"
+        )
+        print(f"  ✅ Signing configuration created successfully")
 
         config.signing_info = signing_config
 
