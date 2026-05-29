@@ -513,6 +513,22 @@ def process_intersight_data(driver, mcp_url=None):
             print(f"  ✅ Valid EC private key detected")
             print(f"     Curve: {private_key.curve.name}")
             signing_algorithm = "ecdsa-sha256"
+
+            # Intersight SDK expects EC keys in SEC1 format (BEGIN EC PRIVATE KEY)
+            # Convert from PKCS#8 back to SEC1 for SDK compatibility
+            print(f"  🔄 Converting key to SEC1 format for SDK...")
+            sec1_key = private_key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.TraditionalOpenSSL,
+                encryption_algorithm=serialization.NoEncryption()
+            )
+
+            # Write SEC1 formatted key to new temp file
+            with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.pem') as f:
+                f.write(sec1_key)
+                key_file_path = f.name
+            print(f"  ✅ Wrote SEC1 key to: {key_file_path}")
+
         else:
             print(f"  ✅ Valid RSA private key detected")
             print(f"     Key size: {private_key.key_size} bits")
