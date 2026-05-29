@@ -178,9 +178,18 @@ NEO4J_URI = os.getenv("NEO4J_URI")
 NEO4J_USER = os.getenv("NEO4J_USER")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
 
-# Intersight MCP configuration
+# Intersight configuration
+# Option 1: Direct SDK access (preferred for MAC addresses)
+INTERSIGHT_API_KEY_ID = os.getenv("INTERSIGHT_API_KEY_ID", "")
+INTERSIGHT_API_SECRET_KEY = os.getenv("INTERSIGHT_API_SECRET_KEY", "")  # PEM content or path
+INTERSIGHT_BASE_URL = os.getenv("INTERSIGHT_BASE_URL", "https://intersight.com")
+
+# Option 2: MCP server (fallback for queries)
 INTERSIGHT_MCP_ENABLED = os.getenv("INTERSIGHT_MCP_ENABLED", "true").lower() == "true"
 INTERSIGHT_MCP_URL = os.getenv("INTERSIGHT_MCP_URL", "http://intersight-mcp:3000")
+
+# Enable Intersight ingestion only if SDK credentials are available
+INTERSIGHT_ENABLED = bool(INTERSIGHT_API_KEY_ID and INTERSIGHT_API_SECRET_KEY)
 
 # Optional: Specify which ND fabric this APIC belongs to (for linking Tenants/Nodes)
 # If not set, will try to auto-detect or use first fabric
@@ -347,19 +356,19 @@ def _execute_ingestion(parent_span):
                 SYNC_STATUS.labels(source="nexus_dashboard").set(0)
 
         # === Intersight Data (Compute Infrastructure) ===
-        if INTERSIGHT_MCP_ENABLED:
+        if INTERSIGHT_ENABLED:
             intersight_start = time.time()
-            print("\n🖥️  Attempting Intersight MCP connection...")
+            print("\n🖥️  Attempting Intersight SDK connection...")
             try:
                 if ingestor_tracer:
                     with ingestor_tracer.start_as_current_span(
                         "process_intersight_data",
                         kind=SpanKind.INTERNAL,
-                        attributes={"data.source": "intersight", "intersight.url": INTERSIGHT_MCP_URL}
+                        attributes={"data.source": "intersight", "intersight.api_key": INTERSIGHT_API_KEY_ID[:20] + "..."}
                     ):
-                        process_intersight_data(neo4j_driver, INTERSIGHT_MCP_URL)
+                        process_intersight_data(neo4j_driver)
                 else:
-                    process_intersight_data(neo4j_driver, INTERSIGHT_MCP_URL)
+                    process_intersight_data(neo4j_driver)
 
                 if METRICS_ENABLED:
                     SYNC_DURATION.labels(source="intersight").observe(time.time() - intersight_start)
@@ -374,7 +383,7 @@ def _execute_ingestion(parent_span):
                     SYNC_ERRORS.labels(source="intersight", error_type=type(e).__name__).inc()
                     SYNC_STATUS.labels(source="intersight").set(0)
         else:
-            print("\n🖥️  Intersight MCP disabled (set INTERSIGHT_MCP_ENABLED=true to enable)")
+            print("\n🖥️  Intersight disabled (set INTERSIGHT_API_KEY_ID and INTERSIGHT_API_SECRET_KEY to enable)")
 
         # === Mark Data Source Availability in Neo4j ===
         print("\n📊 Updating data source availability...")
@@ -420,10 +429,12 @@ def _execute_ingestion(parent_span):
             parent_span.record_exception(e)
 
 # --- FUNCTIONS FOR INTERSIGHT ---
-def process_intersight_data(driver, mcp_url):
+def process_intersight_data(driver, mcp_url=None):
     """
-    Fetch server inventory from Intersight MCP and create relationships
-    with network endpoints based on MAC address correlation.
+    Fetch server inventory from Intersight using direct SDK access and create
+    relationships with network endpoints based on MAC address correlation.
+
+    Uses Intersight Python SDK for reliable MAC address retrieval.
     """
     sync_start_time = datetime.now(timezone.utc)
     counters = {
@@ -434,51 +445,72 @@ def process_intersight_data(driver, mcp_url):
         "updated_servers": 0
     }
 
-    print("  🖥️  Fetching server inventory from Intersight MCP...")
+    print("  🖥️  Fetching server inventory from Intersight SDK...")
 
     try:
-        # Step 1: Health check
-        health_response = requests.get(f"{mcp_url}/health", timeout=10)
-        if health_response.status_code != 200:
-            print(f"  ❌ Intersight MCP health check failed: {health_response.status_code}")
+        # Initialize Intersight API client with SDK
+        from intersight.api_client import ApiClient
+        from intersight.configuration import Configuration
+        from intersight.api import compute_api, adapter_api
+
+        # Configure API client
+        config = Configuration()
+        config.host = INTERSIGHT_BASE_URL
+
+        # Handle API key authentication
+        # API secret can be either PEM content or file path
+        if INTERSIGHT_API_SECRET_KEY.startswith("-----BEGIN"):
+            # Direct PEM content
+            config.signing_info = {
+                "signing_algorithm": "rsa-sha256",
+                "signing_scheme": "hs2019",
+                "key_id": INTERSIGHT_API_KEY_ID,
+                "private_key_data": INTERSIGHT_API_SECRET_KEY
+            }
+        else:
+            # File path
+            config.signing_info = {
+                "signing_algorithm": "rsa-sha256",
+                "signing_scheme": "hs2019",
+                "key_id": INTERSIGHT_API_KEY_ID,
+                "private_key_path": INTERSIGHT_API_SECRET_KEY
+            }
+
+        api_client = ApiClient(config)
+        compute_instance = compute_api.ComputeApi(api_client)
+        adapter_instance = adapter_api.AdapterApi(api_client)
+
+        # Step 1: Get list of all compute servers
+        print("  📡 Querying compute.PhysicalSummary...")
+        servers_response = compute_instance.get_compute_physical_summary_list()
+
+        if not servers_response or not hasattr(servers_response, 'results'):
+            print("  ❌ No server data returned from Intersight")
             return
 
-        # Step 2: Get list of all compute servers
-        execute_url = f"{mcp_url}/api/execute"
-        servers_response = requests.post(
-            execute_url,
-            json={"tool": "list_compute_servers", "arguments": {}},
-            timeout=60
-        )
-
-        if servers_response.status_code != 200:
-            print(f"  ❌ Failed to fetch servers: {servers_response.status_code}")
-            return
-
-        servers_data = servers_response.json()
-        if not servers_data.get("success"):
-            print(f"  ❌ Intersight tool execution failed: {servers_data.get('error')}")
-            return
-
-        servers = servers_data.get("result", {}).get("Results", [])
+        servers = servers_response.results
         print(f"  📊 Found {len(servers)} servers in Intersight")
 
         with driver.session() as db_session:
             for server in servers:
                 try:
-                    # Extract server information
-                    server_name = server.get("Name", "Unknown")
-                    server_moid = server.get("Moid")
-                    server_model = server.get("Model", "Unknown")
-                    server_serial = server.get("Serial", "")
-                    server_cpu_cores = server.get("NumCpus", 0)
-                    server_memory_gb = server.get("TotalMemory", 0) // 1024  # Convert MB to GB
-                    server_power_state = server.get("OperPowerState", "unknown")
+                    # Extract server information from SDK object
+                    server_name = getattr(server, 'name', 'Unknown')
+                    server_moid = getattr(server, 'moid', None)
+                    server_model = getattr(server, 'model', 'Unknown')
+                    server_serial = getattr(server, 'serial', '')
+                    server_cpu_cores = getattr(server, 'num_cpus', 0)
+                    server_memory_gb = getattr(server, 'total_memory', 0) // 1024 if hasattr(server, 'total_memory') else 0
+                    server_power_state = getattr(server, 'oper_power_state', 'unknown')
 
-                    # Health status
-                    alarm_summary = server.get("AlarmSummary", {})
-                    critical_alarms = alarm_summary.get("Critical", 0)
-                    warning_alarms = alarm_summary.get("Warning", 0)
+                    # Health status from alarm summary
+                    alarm_summary = getattr(server, 'alarm_summary', None)
+                    if alarm_summary:
+                        critical_alarms = getattr(alarm_summary, 'critical', 0)
+                        warning_alarms = getattr(alarm_summary, 'warning', 0)
+                    else:
+                        critical_alarms = 0
+                        warning_alarms = 0
 
                     if critical_alarms > 0:
                         health_status = "Critical"
@@ -486,6 +518,10 @@ def process_intersight_data(driver, mcp_url):
                         health_status = "Warning"
                     else:
                         health_status = "Healthy"
+
+                    if not server_moid:
+                        print(f"  ⚠️  Skipping server {server_name} - no MOID")
+                        continue
 
                     # Create or update IntersightServer node
                     result = traced_neo4j_run(
@@ -540,31 +576,25 @@ def process_intersight_data(driver, mcp_url):
                         else:
                             counters["updated_servers"] += 1
 
-                    # Step 3: Get adapter host ethernet interfaces for this server to extract MAC addresses
-                    # Use search_resources to query adapter/HostEthInterfaces filtered by server MOID
-                    adapters_response = requests.post(
-                        execute_url,
-                        json={
-                            "tool": "search_resources",
-                            "arguments": {
-                                "resourceType": "adapter/HostEthInterfaces",
-                                "filter": f"RegisteredDevice/Moid eq '{server_moid}'"
-                            }
-                        },
-                        timeout=30
-                    )
+                    # Step 3: Get adapter host ethernet interfaces for this server using SDK
+                    # Query adapter.HostEthInterface filtered by parent compute blade/rack unit
+                    try:
+                        # Filter: Parent/Moid eq 'server_moid'
+                        filter_str = f"Parent/Moid eq '{server_moid}'"
+                        adapters_response = adapter_instance.get_adapter_host_eth_interface_list(filter=filter_str)
 
-                    if adapters_response.status_code == 200:
-                        adapters_data = adapters_response.json()
-                        if adapters_data.get("success"):
-                            adapters = adapters_data.get("result", {}).get("Results", [])
+                        if adapters_response and hasattr(adapters_response, 'results'):
+                            adapters = adapters_response.results
 
                             # Process each ethernet interface
                             for adapter in adapters:
-                                mac_address = adapter.get("MacAddress", "").upper()
+                                mac_address = getattr(adapter, 'mac_address', '')
+                                if mac_address:
+                                    mac_address = mac_address.upper()
 
                                 if mac_address and mac_address != "" and mac_address != "00:00:00:00:00:00":
                                     counters["vnics"] += 1
+                                    adapter_name = getattr(adapter, 'name', 'Unknown')
 
                                     # Step 4: Correlate with ACI endpoints by MAC address
                                     correlation_result = traced_neo4j_run(
@@ -582,7 +612,7 @@ def process_intersight_data(driver, mcp_url):
                                         "neo4j.correlate_mac",
                                         server_moid=server_moid,
                                         mac=mac_address,
-                                        interface_name=adapter.get("Name", "Unknown"),
+                                        interface_name=adapter_name,
                                         timestamp=sync_start_time
                                     )
 
@@ -591,6 +621,9 @@ def process_intersight_data(driver, mcp_url):
                                         counters["mac_correlations"] += len(matched_records)
                                         for match in matched_records:
                                             print(f"    ✅ Correlated: Server '{server_name}' ↔ MAC {mac_address} ↔ IP {match['endpoint_ip']}")
+                    except Exception as adapter_error:
+                        print(f"  ⚠️  Could not fetch adapters for server {server_name}: {adapter_error}")
+                        # Continue with server even if adapters fail
 
                 except Exception as server_error:
                     print(f"  ⚠️  Error processing server {server.get('Name', 'Unknown')}: {server_error}")
@@ -624,11 +657,12 @@ def process_intersight_data(driver, mcp_url):
             RECORDS_SYNCED.labels(source="intersight", type="vnic").inc(counters["vnics"])
             RECORDS_SYNCED.labels(source="intersight", type="correlation").inc(counters["mac_correlations"])
 
-    except requests.exceptions.RequestException as e:
-        print(f"  ❌ Intersight MCP connection error: {e}")
+    except ImportError as e:
+        print(f"  ❌ Intersight SDK not available: {e}")
+        print("     Install with: pip install intersight")
         raise
     except Exception as e:
-        print(f"  ❌ Intersight processing error: {e}")
+        print(f"  ❌ Intersight SDK error: {e}")
         import traceback
         traceback.print_exc()
         raise
