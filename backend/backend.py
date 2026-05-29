@@ -1525,9 +1525,16 @@ async def query_intersight_with_llm(question: str, chat_history: str = "") -> tu
             # Health/telemetry queries (server health, metrics)
             elif "health" in question_lower or "telemetry" in question_lower or "cpu" in question_lower or "memory" in question_lower or "temperature" in question_lower:
                 candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["health", "telemetry", "statistics"])]
-            # Server/compute keywords
+            # Server/compute keywords - if we have a specific server MOID, prefer get/query tools
             elif "server" in question_lower or "ucs" in question_lower or "compute" in question_lower or "blade" in question_lower or "rack" in question_lower:
-                candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["server", "compute", "blade", "rack"])]
+                if server_moid:
+                    # Prefer tools that can query a specific server
+                    candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["get_server", "get_compute", "server_detail"])]
+                    if not candidate_tools:
+                        # Fallback to list tools that can be filtered
+                        candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["list_compute_servers", "list_server"])]
+                else:
+                    candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["server", "compute", "blade", "rack"])]
             # Network adapter/vNIC keywords (for correlation)
             elif "mac" in question_lower or "vnic" in question_lower or "adapter" in question_lower:
                 candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["vnic", "adapter", "mac", "ethernet"])]
@@ -1596,14 +1603,15 @@ Selected tool:"""
                         print(f"⚠️ Error looking up server MOID: {e}")
 
             # Add server MOID to tool arguments if found
-            if server_moid and (
-                "health" in selected_tool.lower() or
-                "telemetry" in selected_tool.lower() or
-                "statistics" in selected_tool.lower() or
-                "get_server" in selected_tool.lower()
-            ):
-                tool_arguments["moid"] = server_moid
-                print(f"📋 Passing server MOID to tool: {server_moid}")
+            if server_moid:
+                # Pass MOID to get/query tools
+                if any(kw in selected_tool.lower() for kw in ["get_server", "get_compute", "health", "telemetry", "statistics", "detail"]):
+                    tool_arguments["moid"] = server_moid
+                    print(f"📋 Passing server MOID to tool: {server_moid}")
+                # For list tools, use filter parameter with server name
+                elif "list" in selected_tool.lower() and server_name:
+                    tool_arguments["filter"] = f"Name eq '{server_name}'"
+                    print(f"📋 Filtering by server name: {server_name}")
 
             # For list_alarms, add severity filter if mentioned
             if selected_tool == "list_alarms":
