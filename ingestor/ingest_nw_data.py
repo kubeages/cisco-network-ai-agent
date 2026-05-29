@@ -475,11 +475,20 @@ def process_intersight_data(driver, mcp_url=None):
 
         # Create signing configuration with required parameters
         # signing_scheme must be "hs2019" for Intersight
+        # signing_algorithm: use "ecdsa-sha256" for EC keys, "rsa-sha256" for RSA keys
+        # Detect key type from PEM header
+        with open(key_file_path, 'r') as f:
+            key_content = f.read()
+            if 'EC PRIVATE KEY' in key_content:
+                signing_algorithm = "ecdsa-sha256"
+            else:
+                signing_algorithm = "rsa-sha256"
+
         signing_config = HttpSigningConfiguration(
             key_id=INTERSIGHT_API_KEY_ID,
             private_key_path=key_file_path,
             signing_scheme="hs2019",
-            signing_algorithm="rsa-sha256",
+            signing_algorithm=signing_algorithm,
             hash_algorithm="sha256"
         )
 
