@@ -9,6 +9,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+
+# Force cache invalidation for frontend.py changes
+ARG CACHEBUST=1
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir --force-reinstall -r requirements.txt
 COPY frontend.py .
