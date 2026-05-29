@@ -473,24 +473,78 @@ def process_intersight_data(driver, mcp_url=None):
             # File path provided
             key_file_path = INTERSIGHT_API_SECRET_KEY
 
-        # Create signing configuration with required parameters
-        # signing_scheme must be "hs2019" for Intersight
-        # signing_algorithm: use "ecdsa-sha256" for EC keys, "rsa-sha256" for RSA keys
-        # Detect key type from PEM header
-        with open(key_file_path, 'r') as f:
-            key_content = f.read()
-            if 'EC PRIVATE KEY' in key_content:
-                signing_algorithm = "ecdsa-sha256"
-            else:
-                signing_algorithm = "rsa-sha256"
+        # Debug: Validate key with cryptography library first
+        print(f"  🔍 Validating private key...")
+        try:
+            from cryptography.hazmat.primitives import serialization
+            from cryptography.hazmat.backends import default_backend
 
-        signing_config = HttpSigningConfiguration(
-            key_id=INTERSIGHT_API_KEY_ID,
-            private_key_path=key_file_path,
-            signing_scheme="hs2019",
-            signing_algorithm=signing_algorithm,
-            hash_algorithm="sha256"
-        )
+            with open(key_file_path, 'rb') as key_file:
+                key_data = key_file.read()
+
+            # Try loading as EC key
+            try:
+                from cryptography.hazmat.primitives.asymmetric import ec
+                private_key = serialization.load_pem_private_key(
+                    key_data,
+                    password=None,
+                    backend=default_backend()
+                )
+
+                if isinstance(private_key, ec.EllipticCurvePrivateKey):
+                    print(f"  ✅ Valid EC private key detected")
+                    print(f"     Curve: {private_key.curve.name}")
+                    signing_algorithm = "ecdsa-sha256"
+                else:
+                    print(f"  ✅ Valid RSA private key detected")
+                    signing_algorithm = "rsa-sha256"
+
+            except Exception as e:
+                print(f"  ⚠️  Key validation warning: {e}")
+                # Fallback to header detection
+                with open(key_file_path, 'r') as f:
+                    key_content = f.read()
+                    if 'EC PRIVATE KEY' in key_content:
+                        signing_algorithm = "ecdsa-sha256"
+                    else:
+                        signing_algorithm = "rsa-sha256"
+
+        except ImportError:
+            print(f"  ⚠️  Cryptography library not available for validation")
+            # Fallback to header detection
+            with open(key_file_path, 'r') as f:
+                key_content = f.read()
+                if 'EC PRIVATE KEY' in key_content:
+                    signing_algorithm = "ecdsa-sha256"
+                else:
+                    signing_algorithm = "rsa-sha256"
+
+        print(f"  📝 Using signing algorithm: {signing_algorithm}")
+
+        # Try creating signing config with minimal parameters first
+        try:
+            signing_config = HttpSigningConfiguration(
+                key_id=INTERSIGHT_API_KEY_ID,
+                private_key_path=key_file_path,
+                signing_scheme="hs2019",
+                signing_algorithm=signing_algorithm,
+                hash_algorithm="sha256"
+            )
+        except Exception as e:
+            print(f"  ⚠️  Signing config failed with {signing_algorithm}, trying alternative...")
+            # If ecdsa-sha256 fails, try rsassa-pkcs-sha256 (some SDK versions use different names)
+            if signing_algorithm == "ecdsa-sha256":
+                signing_algorithm = "rsassa-pkcs-sha256"
+            else:
+                signing_algorithm = "ecdsa-sha256"
+            print(f"  🔄 Retrying with: {signing_algorithm}")
+            signing_config = HttpSigningConfiguration(
+                key_id=INTERSIGHT_API_KEY_ID,
+                private_key_path=key_file_path,
+                signing_scheme="hs2019",
+                signing_algorithm=signing_algorithm,
+                hash_algorithm="sha256"
+            )
 
         config.signing_info = signing_config
 
