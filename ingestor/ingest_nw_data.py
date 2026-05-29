@@ -584,16 +584,21 @@ def process_intersight_data(driver, mcp_url=None):
                 print(f"    Found {len(all_adapters)} total adapters in system")
 
                 # Group adapters by parent MOID for efficient lookup
+                sample_parent_types = set()
                 for adapter in all_adapters:
                     parent = getattr(adapter, 'parent', None)
                     if parent:
                         parent_moid = getattr(parent, 'moid', None)
+                        parent_type = getattr(parent, 'object_type', 'Unknown')
+                        if len(sample_parent_types) < 5:
+                            sample_parent_types.add(parent_type)
                         if parent_moid:
                             if parent_moid not in adapters_by_parent:
                                 adapters_by_parent[parent_moid] = []
                             adapters_by_parent[parent_moid].append(adapter)
                 print(f"    Grouped adapters by {len(adapters_by_parent)} parent servers")
-                print(f"    Sample parent MOIDs: {list(adapters_by_parent.keys())[:3]}")
+                print(f"    Adapter parent types: {sample_parent_types}")
+                print(f"    Sample adapter parent MOIDs: {list(adapters_by_parent.keys())[:3]}")
         except Exception as e:
             print(f"    ⚠️  Adapter query failed: {e}")
 
@@ -689,7 +694,8 @@ def process_intersight_data(driver, mcp_url=None):
 
                         # Debug: Show first few server MOIDs we're looking for
                         if counters["servers"] < 3:
-                            print(f"    🔍 Looking for adapters with parent MOID: {server_moid} (server: {server_name})")
+                            server_obj_type = getattr(server, 'object_type', 'Unknown')
+                            print(f"    🔍 Server '{server_name}' (type: {server_obj_type}, MOID: {server_moid})")
                             if server_moid in adapters_by_parent:
                                 print(f"       ✅ Found in dictionary with {len(server_adapters)} adapters")
                             else:
