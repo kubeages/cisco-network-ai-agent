@@ -2096,12 +2096,45 @@ def get_suggestions(request: SuggestionRequest):
     print(f"🤔 Generating suggestions for: {request.question[:50]}...")
 
     try:
-        suggestion_chain = suggestion_prompt | suggestion_llm
-        suggestion_response = suggestion_chain.invoke({
-            "question": request.question,
-            "answer": request.answer,
-            "schema": graph.get_schema
-        })
+        # Detect if this is an Intersight/compute query
+        question_lower = request.question.lower()
+        answer_lower = request.answer.lower()
+
+        is_intersight_query = any(kw in question_lower or kw in answer_lower
+                                   for kw in ["server", "ucs", "compute", "blade", "rack",
+                                             "chassis", "intersight", "alarm", "cpu", "memory"])
+
+        if is_intersight_query:
+            # Use Intersight-specific prompt
+            intersight_prompt = PromptTemplate.from_template(
+                """You are a compute infrastructure assistant. Based on the conversation about servers and compute resources, generate three direct follow-up queries that a user might want to ask next.
+
+Focus on compute/server topics like:
+- Server health and alarms
+- Hardware details (CPU, memory, storage)
+- Server configurations and policies
+- Network adapters and connectivity
+- Chassis and fabric interconnects
+
+Question: {question}
+Answer: {answer}
+
+Return only a list of three direct queries, one per line, without numbers or bullets.
+Follow-up queries:"""
+            )
+            suggestion_chain = intersight_prompt | suggestion_llm
+            suggestion_response = suggestion_chain.invoke({
+                "question": request.question,
+                "answer": request.answer
+            })
+        else:
+            # Use network-focused prompt
+            suggestion_chain = suggestion_prompt | suggestion_llm
+            suggestion_response = suggestion_chain.invoke({
+                "question": request.question,
+                "answer": request.answer,
+                "schema": graph.get_schema
+            })
         suggestions = []
         for line in suggestion_response.content.split("\n"):
             processed_line = line.strip()

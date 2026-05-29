@@ -1609,7 +1609,7 @@ footer {
 
 /* Suggestions label */
 #suggestions-label {
-    color: #8b949e !important;
+    color: #c9d1d9 !important;
     font-size: 11px !important;
     flex-shrink: 0 !important;
     margin: 0 !important;
@@ -1617,7 +1617,7 @@ footer {
 }
 #suggestions-label p {
     margin: 0 !important;
-    color: #8b949e !important;
+    color: #c9d1d9 !important;
     font-size: 11px !important;
 }
 
