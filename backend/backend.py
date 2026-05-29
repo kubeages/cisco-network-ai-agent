@@ -1573,6 +1573,38 @@ Selected tool:"""
             # Generate tool arguments based on question
             tool_arguments = {}
 
+            # Extract server name from question (quoted entities)
+            import re
+            quoted_entities = re.findall(r"['\"]([^'\"]+)['\"]", question)
+
+            # If query mentions a specific server, look up its MOID from Neo4j
+            server_moid = None
+            server_name = None
+            if quoted_entities:
+                for entity_name in quoted_entities:
+                    try:
+                        result = graph.query(
+                            "MATCH (s:IntersightServer {name: $name}) RETURN s.moid AS moid, s.name AS name LIMIT 1",
+                            params={"name": entity_name}
+                        )
+                        if result and len(result) > 0:
+                            server_moid = result[0].get('moid')
+                            server_name = result[0].get('name')
+                            print(f"🔍 Found server '{server_name}' with MOID: {server_moid}")
+                            break
+                    except Exception as e:
+                        print(f"⚠️ Error looking up server MOID: {e}")
+
+            # Add server MOID to tool arguments if found
+            if server_moid and (
+                "health" in selected_tool.lower() or
+                "telemetry" in selected_tool.lower() or
+                "statistics" in selected_tool.lower() or
+                "get_server" in selected_tool.lower()
+            ):
+                tool_arguments["moid"] = server_moid
+                print(f"📋 Passing server MOID to tool: {server_moid}")
+
             # For list_alarms, add severity filter if mentioned
             if selected_tool == "list_alarms":
                 if "critical" in question_lower:
