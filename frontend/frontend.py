@@ -2221,9 +2221,14 @@ function() {
             return;
         }
 
-        fetch('/api/capabilities')
+        fetch('/api/capabilities', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ data: [] })
+        })
             .then(response => response.json())
-            .then(data => {
+            .then(result => {
+                var data = result.data && result.data[0] ? result.data[0] : {};
                 var ndStatus = (data.mcp_health && data.mcp_health.nd_mcp) || { available: false, error: 'Unknown' };
                 var isStatus = (data.mcp_health && data.mcp_health.intersight_mcp) || { available: false, error: 'Unknown' };
 
@@ -2281,6 +2286,9 @@ with gr.Blocks(theme=gr.themes.Base(), title="Network AI Agent", css=custom_css,
 
     # State for dynamic suggestions
     suggestions_state = gr.State(initial_suggestions)
+
+    # Hidden component for MCP status API (accessible via /api/mcp_status)
+    mcp_status_output = gr.JSON(visible=False, elem_id="mcp-status-api")
 
     # Hidden component to receive node click data from iframe (hidden via CSS, not visible=False)
     node_click_data = gr.Textbox(elem_id="node-click-data", label="", container=False)
@@ -2545,24 +2553,11 @@ with gr.Blocks(theme=gr.themes.Base(), title="Network AI Agent", css=custom_css,
         outputs=[graph_html]
     )
 
-# Add FastAPI route for MCP status (proxy to backend)
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse
-
-# Access the underlying FastAPI app
-app: FastAPI = demo.app
-
-@app.get("/api/capabilities")
-async def get_capabilities_proxy():
-    """Proxy endpoint for frontend JavaScript to check MCP status"""
-    try:
-        response = requests.get(BACKEND_CAPABILITIES_URL, timeout=5)
-        response.raise_for_status()
-        return JSONResponse(content=response.json())
-    except requests.exceptions.RequestException as e:
-        return JSONResponse(
-            content={"error": str(e), "mcp_health": {"nd_mcp": {"available": False, "error": "Backend unreachable"}, "intersight_mcp": {"available": False, "error": "Backend unreachable"}}},
-            status_code=503
-        )
+    # MCP Status API endpoint (load on page load)
+    demo.load(
+        fn=fetch_capabilities,
+        outputs=[mcp_status_output],
+        api_name="capabilities"
+    )
 
 demo.launch(server_name="0.0.0.0", server_port=7860, pwa=False)
