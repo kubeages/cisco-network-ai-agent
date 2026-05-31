@@ -1190,23 +1190,36 @@ def get_agent_response(question, history):
 
 
 def fetch_suggestions(question, answer):
-    """Fetch suggestions asynchronously after answer is displayed"""
+    """Fetch suggestions asynchronously after answer is displayed.
+
+    Retries once on transient failures (connection reset/EPERM seen during
+    pod/Cilium endpoint churn) before falling back to initial_suggestions.
+    """
     if not question or not answer:
         return initial_suggestions
 
-    try:
-        response = requests.post(
-            SUGGESTIONS_URL,
-            json={"question": question, "answer": answer},
-            timeout=30
-        )
-        response.raise_for_status()
-        data = response.json()
-        suggestions = data.get("suggestions", [])
-        if suggestions:
-            return suggestions
-    except Exception as e:
-        print(f"Error fetching suggestions: {e}")
+    import time
+    last_err = None
+    for attempt in range(2):
+        try:
+            response = requests.post(
+                SUGGESTIONS_URL,
+                json={"question": question, "answer": answer},
+                timeout=30
+            )
+            response.raise_for_status()
+            data = response.json()
+            suggestions = data.get("suggestions", [])
+            if suggestions:
+                return suggestions
+            return initial_suggestions
+        except Exception as e:
+            last_err = e
+            if attempt == 0:
+                print(f"⚠️ Suggestion fetch failed (attempt 1/2), retrying: {e}")
+                time.sleep(0.5)
+                continue
+            print(f"❌ Error fetching suggestions after retry: {e}")
 
     return initial_suggestions
 
