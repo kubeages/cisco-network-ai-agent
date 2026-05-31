@@ -2239,7 +2239,7 @@ function() {
                 var dataLine = lines.find(function(line) { return line.startsWith('data: '); });
                 if (!dataLine) throw new Error('No data in response');
 
-                var data = JSON.parse(dataLine.substring(6))[0]; // Remove 'data: ' prefix and get first element
+                var data = JSON.parse(dataLine.substring(6))[0];
                 var ndStatus = (data.mcp_health && data.mcp_health.nd_mcp) || { available: false, error: 'Unknown' };
                 var isStatus = (data.mcp_health && data.mcp_health.intersight_mcp) || { available: false, error: 'Unknown' };
 
