@@ -2234,9 +2234,15 @@ function() {
             })
             .then(response => response.text())
             .then(text => {
-                // Parse SSE (Server-Sent Events) format
+                // Parse SSE format - find line starting with 'data: '
                 var lines = text.split('\n');
-                var dataLine = lines.find(function(line) { return line.startsWith('data: '); });
+                var dataLine = null;
+                for (var i = 0; i < lines.length; i++) {
+                    if (lines[i].indexOf('data: ') === 0) {
+                        dataLine = lines[i];
+                        break;
+                    }
+                }
                 if (!dataLine) throw new Error('No data in response');
 
                 var data = JSON.parse(dataLine.substring(6))[0];
