@@ -2474,7 +2474,50 @@ def get_suggestions(request: SuggestionRequest):
                                    for kw in ["server", "ucs", "compute", "blade", "rack",
                                              "chassis", "intersight", "alarm", "cpu", "memory"])
 
-        if is_intersight_query:
+        # Detect if this is a specific anomaly/fault INSTANCE (came from a graph node click
+        # and contains a uuid in the question). Generic name-only anomaly questions go
+        # through the standard schema prompt; instance questions get the resource-focused
+        # prompt below so suggestions probe the affected device/vPC/tenant, not a re-query
+        # of the same anomaly name across the fabric.
+        anomaly_uuid_match = re.search(r"uuid '([^']+)'", request.question)
+        is_anomaly_instance = bool(anomaly_uuid_match) and (
+            'anomaly' in question_lower or 'fault' in question_lower
+        )
+
+        if is_anomaly_instance:
+            # Extract context from the answer (affected resource names like vPC, leaf, fabric)
+            # so the suggestion LLM can suggest follow-ups about those specific resources
+            anomaly_instance_prompt = PromptTemplate.from_template(
+                """The user just inspected ONE specific anomaly or fault instance on a Cisco ACI
+topology graph. The answer describes the affected resource (e.g. a specific vPC name,
+leaf switch, interface, tenant, or fabric).
+
+Generate three follow-up queries that DRILL INTO THE AFFECTED RESOURCE, not the
+anomaly/fault name. Good follow-ups for Cisco ACI:
+- "Are there other anomalies on leaf-101 or leaf-102?"
+- "What other vPCs are configured on these leaves?"
+- "Which EPGs or endpoints use the affected vPC 'netbox-vpc'?"
+- "Show me the recent faults on the affected leaf switches"
+- "What is the health of the fabric 'ams-aci'?"
+- "Which tenants are impacted by this issue?"
+
+AVOID suggestions that just re-query the same anomaly name (e.g. "What is the status of
+VPC_DOWN in fabric ams-aci" - the user already has the answer for this specific instance).
+AVOID generic "list all fabrics" style.
+Mention specific resource names from the answer.
+
+Question: {question}
+Answer: {answer}
+
+Return only three queries, one per line, without numbers or bullets.
+Follow-up queries:"""
+            )
+            suggestion_chain = anomaly_instance_prompt | suggestion_llm
+            suggestion_response = suggestion_chain.invoke({
+                "question": request.question,
+                "answer": request.answer
+            })
+        elif is_intersight_query:
             # Use Intersight-specific prompt
             intersight_prompt = PromptTemplate.from_template(
                 """You are a compute infrastructure assistant. Based on the conversation about servers and compute resources, generate three direct follow-up queries that a user might want to ask next.
