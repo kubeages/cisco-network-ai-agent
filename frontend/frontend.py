@@ -2209,70 +2209,71 @@ function() {
             console.log('[GBAIA] Theme toggle attached, saved:', saved);
         }
     }
+
+    /* === MCP STATUS BADGES AUTO-UPDATE === */
+    function updateMCPStatus() {
+        var ndBadge = document.getElementById('nd-mcp-badge');
+        var isBadge = document.getElementById('intersight-mcp-badge');
+
+        if (!ndBadge || !isBadge) {
+            console.log('[GBAIA] MCP badges not found, retrying...');
+            setTimeout(updateMCPStatus, 1000);
+            return;
+        }
+
+        fetch('/api/capabilities')
+            .then(response => response.json())
+            .then(data => {
+                var ndStatus = (data.mcp_health && data.mcp_health.nd_mcp) || { available: false, error: 'Unknown' };
+                var isStatus = (data.mcp_health && data.mcp_health.intersight_mcp) || { available: false, error: 'Unknown' };
+
+                // Update ND MCP badge
+                var ndDot = ndBadge.querySelector('.status-dot');
+                if (ndStatus.available) {
+                    ndDot.className = 'status-dot online';
+                    ndBadge.title = 'Nexus Dashboard MCP: Online';
+                } else if (ndStatus.error === 'Disabled') {
+                    ndDot.className = 'status-dot unknown';
+                    ndBadge.title = 'Nexus Dashboard MCP: Disabled';
+                } else {
+                    ndDot.className = 'status-dot offline';
+                    ndBadge.title = 'Nexus Dashboard MCP: Offline (' + ndStatus.error + ')';
+                }
+
+                // Update Intersight MCP badge
+                var isDot = isBadge.querySelector('.status-dot');
+                if (isStatus.available) {
+                    isDot.className = 'status-dot online';
+                    isBadge.title = 'Intersight MCP: Online';
+                } else if (isStatus.error === 'Disabled') {
+                    isDot.className = 'status-dot unknown';
+                    isBadge.title = 'Intersight MCP: Disabled';
+                } else {
+                    isDot.className = 'status-dot offline';
+                    isBadge.title = 'Intersight MCP: Offline (' + isStatus.error + ')';
+                }
+
+                console.log('[GBAIA] MCP status updated - ND:', ndStatus.available, 'IS:', isStatus.available);
+            })
+            .catch(error => {
+                console.error('[GBAIA] Failed to fetch MCP status:', error);
+            });
+    }
+
+    // Initial update and refresh every 30 seconds
+    setTimeout(updateMCPStatus, 1000);
+    setInterval(updateMCPStatus, 30000);
+
+    // Click to force refresh
+    document.addEventListener('click', function(e) {
+        if (e.target.closest('.mcp-badge')) {
+            console.log('[GBAIA] Manual MCP status refresh triggered');
+            updateMCPStatus();
+        }
+    });
+
     attach();
 }
-
-/* === MCP STATUS BADGES AUTO-UPDATE === */
-function updateMCPStatus() {
-    var ndBadge = document.getElementById('nd-mcp-badge');
-    var isBadge = document.getElementById('intersight-mcp-badge');
-
-    if (!ndBadge || !isBadge) {
-        console.log('[GBAIA] MCP badges not found, retrying...');
-        setTimeout(updateMCPStatus, 1000);
-        return;
-    }
-
-    fetch('/api/capabilities')
-        .then(response => response.json())
-        .then(data => {
-            var ndStatus = (data.mcp_health && data.mcp_health.nd_mcp) || { available: false, error: 'Unknown' };
-            var isStatus = (data.mcp_health && data.mcp_health.intersight_mcp) || { available: false, error: 'Unknown' };
-
-            // Update ND MCP badge
-            var ndDot = ndBadge.querySelector('.status-dot');
-            if (ndStatus.available) {
-                ndDot.className = 'status-dot online';
-                ndBadge.title = 'Nexus Dashboard MCP: Online';
-            } else if (ndStatus.error === 'Disabled') {
-                ndDot.className = 'status-dot unknown';
-                ndBadge.title = 'Nexus Dashboard MCP: Disabled';
-            } else {
-                ndDot.className = 'status-dot offline';
-                ndBadge.title = 'Nexus Dashboard MCP: Offline (' + ndStatus.error + ')';
-            }
-
-            // Update Intersight MCP badge
-            var isDot = isBadge.querySelector('.status-dot');
-            if (isStatus.available) {
-                isDot.className = 'status-dot online';
-                isBadge.title = 'Intersight MCP: Online';
-            } else if (isStatus.error === 'Disabled') {
-                isDot.className = 'status-dot unknown';
-                isBadge.title = 'Intersight MCP: Disabled';
-            } else {
-                isDot.className = 'status-dot offline';
-                isBadge.title = 'Intersight MCP: Offline (' + isStatus.error + ')';
-            }
-
-            console.log('[GBAIA] MCP status updated - ND:', ndStatus.available, 'IS:', isStatus.available);
-        })
-        .catch(error => {
-            console.error('[GBAIA] Failed to fetch MCP status:', error);
-        });
-}
-
-// Initial update and refresh every 30 seconds
-setTimeout(updateMCPStatus, 1000);
-setInterval(updateMCPStatus, 30000);
-
-// Click to force refresh
-document.addEventListener('click', function(e) {
-    if (e.target.closest('.mcp-badge')) {
-        console.log('[GBAIA] Manual MCP status refresh triggered');
-        updateMCPStatus();
-    }
-});
 """
 
 # --- Gradio Interface ---
