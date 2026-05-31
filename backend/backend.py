@@ -2586,21 +2586,44 @@ Follow-up queries:"""
                 "answer": request.answer
             })
         elif is_intersight_query:
-            # Use Intersight-specific prompt
+            # Constrained to questions the working Intersight tools can actually answer.
+            # The MCP's get_server_telemetry is broken (returns 'undefined'), so live
+            # CPU%/memory%/temperature/power-draw queries lead to a "data not available"
+            # stub - we MUST NOT suggest them. list_compute_servers only carries the
+            # inventory record (capacity, cores, total/avail memory, AlarmSummary,
+            # power state, mgmt interface). The Neo4j enrichment adds EPG/AppProfile/
+            # tenant attachment for vNICs. list_alarms (filtered by AffectedMoid) works.
             intersight_prompt = PromptTemplate.from_template(
-                """You are a compute infrastructure assistant. Based on the conversation about servers and compute resources, generate three direct follow-up queries that a user might want to ask next.
+                """You are a Cisco UCS / Intersight assistant. Based on the conversation about
+a specific server, generate three follow-up queries the user might want next.
 
-Focus on compute/server topics like:
-- Server health and alarms
-- Hardware details (CPU, memory, storage)
-- Server configurations and policies
-- Network adapters and connectivity
-- Chassis and fabric interconnects
+ONLY SUGGEST queries we can actually answer from these working data sources:
+  1. Server INVENTORY (list_compute_servers): model, serial, UUID, firmware, total
+     CPU capacity, core/thread counts, total/available memory installed (MB),
+     power state, alarm summary, mgmt/KVM IPs, registered device.
+  2. Server ALARMS (list_alarms filtered by AffectedMoid): the actual alarm records
+     - severity, description, when raised, what triggered them.
+  3. Server NETWORK ATTACHMENT (Neo4j correlated endpoints): vNIC name, MAC, EPG,
+     AppProfile, ACI tenant. Good for "what fabric/EPG/tenant is this server in".
+
+DO NOT SUGGEST any of these (we cannot answer them right now):
+  - "current/live CPU usage", "real-time memory usage", CPU%, memory%
+  - temperature, fan speed, power consumption, telemetry, performance metrics
+  - storage capacity/usage, disk health (not in inventory record)
+  - get_server_details / get_server_profile / get_server_telemetry (broken MCP tools)
+Suggesting these leads to "data not available" answers, which is a bad experience.
+
+Good suggestion shapes (reference real names from the Answer):
+  - "What is the warning/critical alarm for '<server>'?" (if AlarmSummary > 0)
+  - "Which EPG and tenant is '<server>' connected to?" (uses Neo4j enrichment)
+  - "What are the network adapter details for '<server>'?" (Neo4j enrichment)
+  - "Is there a server profile applied to '<server>'?" (inventory has profile ref)
+  - "What is the firmware version on '<server>'?" (inventory has Firmware)
 
 Question: {question}
 Answer: {answer}
 
-Return only a list of three direct queries, one per line, without numbers or bullets.
+Return three queries, one per line, no numbers, no bullets, no surrounding quotes.
 Follow-up queries:"""
             )
             suggestion_chain = intersight_prompt | suggestion_llm
