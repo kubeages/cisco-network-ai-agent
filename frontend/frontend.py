@@ -67,6 +67,9 @@ BACKEND_STREAM_URL = "http://backend-api:8000/ask/stream"
 SUGGESTIONS_URL = "http://backend-api:8000/suggestions"
 GRAPH_URL = "http://backend-api:8000/api/graph"
 
+# External HTTPS URL for browser JavaScript (uses OpenShift route)
+BACKEND_CAPABILITIES_EXTERNAL_URL = "https://backend-api-gbaia.apps.fp-ocp.amsdmz.local/api/capabilities"
+
 # Node styling configuration - J.A.R.V.I.S. cyan/teal palette
 NODE_COLORS = {
     "Tenant": "#00d4ff",      # Cyan (primary accent)
@@ -1926,7 +1929,7 @@ window.addEventListener('message', function(event) {
 # Inject backend API URL as a global variable
 backend_url_script = f"""
 <script>
-window.BACKEND_API_URL = '{BACKEND_CAPABILITIES_URL}';
+window.BACKEND_API_URL = '{BACKEND_CAPABILITIES_EXTERNAL_URL}';
 </script>
 """
 
