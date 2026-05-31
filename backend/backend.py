@@ -1994,6 +1994,21 @@ profile, and tenant. Format example:
     tenant `titansphere`
 This is the connectivity context the user is asking about - do not omit it.
 
+LIVE TELEMETRY ABSENCE - The tool used (`list_compute_servers`) returns the inventory
+record only: it includes CpuCapacity (max GHz available), NumCpuCores, NumThreads,
+TotalMemory (MB installed), AvailableMemory (MB free), OperPowerState, AlarmSummary
+(counts of critical/warning/info alarms). It does NOT include live CPU %, live memory
+usage %, temperature, fan RPM, or power draw - those come from a separate telemetry
+endpoint that is not currently reachable.
+When the user asks about LIVE or CURRENT CPU/memory usage, temperature, or power
+consumption, do NOT say "data is missing" as if it were a database gap. Instead:
+  1. State explicitly that live performance telemetry isn't available through this
+     query path right now,
+  2. Report what IS in the inventory record (capacity, cores, total/available memory,
+     power state, alarm summary),
+  3. Suggest checking the Intersight UI (intersight.com) for the real-time graph if
+     they need live values.
+
 Answer (be concise and focus on the key information):"""
 
             qa_response = qa_llm.invoke(synthesis_prompt)
