@@ -2488,9 +2488,13 @@ with gr.Blocks(theme=gr.themes.Base(), title="Network AI Agent", css=custom_css,
 
     def handle_suggestions_update(question, answer):
         """Fetch and update suggestions asynchronously"""
+        print(f"🔄 handle_suggestions_update called: q_len={len(question or '')}, a_len={len(answer or '')}")
         if not question or not answer:
+            print(f"⚠️  Skipping suggestions fetch: question='{(question or '')[:40]}...', answer empty={not answer}")
             return update_buttons(initial_suggestions)
+        print(f"📞 Calling /suggestions for: {question[:60]}...")
         suggestions = fetch_suggestions(question, answer)
+        print(f"✅ Got {len(suggestions)} suggestions: {[s[:30] for s in suggestions]}")
         return update_buttons(suggestions)
 
     def handle_node_click_prepare(node_data_json):
