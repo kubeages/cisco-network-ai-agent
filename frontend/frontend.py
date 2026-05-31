@@ -2237,16 +2237,25 @@ function() {
             refreshBtn.click();
         }
 
-        // Wait a bit for the update, then read from the JSON component
+        // Wait a bit for the update, then read from the Gradio config
         setTimeout(function() {
-            var jsonComponent = document.querySelector('#mcp-status-api textarea');
-            if (!jsonComponent || !jsonComponent.value) {
+            // Try to get data from Gradio config
+            var data = null;
+            if (window.gradio_config && window.gradio_config.components) {
+                var mcpComponent = window.gradio_config.components.find(function(c) {
+                    return c.props && c.props.elem_id === 'mcp-status-api';
+                });
+                if (mcpComponent && mcpComponent.props && mcpComponent.props.value) {
+                    data = mcpComponent.props.value;
+                }
+            }
+
+            if (!data) {
                 console.log('[GBAIA] MCP status data not available yet');
                 return;
             }
 
             try {
-                var data = JSON.parse(jsonComponent.value);
                 var ndStatus = (data.mcp_health && data.mcp_health.nd_mcp) || { available: false, error: 'Unknown' };
                 var isStatus = (data.mcp_health && data.mcp_health.intersight_mcp) || { available: false, error: 'Unknown' };
 
