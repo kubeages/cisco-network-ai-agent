@@ -2227,14 +2227,14 @@ function() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ data: [] })
         })
-            .then(response => response.json())
-            .then(eventData => {
+            .then(function(response) { return response.json(); })
+            .then(function(eventData) {
                 // Step 2: Fetch the result using the event_id
                 return fetch('/gradio_api/call/capabilities/' + eventData.event_id);
             })
-            .then(response => response.text())
-            .then(text => {
-                // Parse SSE format - find line starting with 'data: '
+            .then(function(response) { return response.text(); })
+            .then(function(text) {
+                // Parse SSE format - find line starting with data:
                 var lines = text.split('\n');
                 var dataLine = null;
                 for (var i = 0; i < lines.length; i++) {
@@ -2277,7 +2277,7 @@ function() {
 
                 console.log('[GBAIA] MCP status updated - ND:', ndStatus.available, 'IS:', isStatus.available);
             })
-            .catch(error => {
+            .catch(function(error) {
                 console.error('[GBAIA] Failed to fetch MCP status:', error);
             });
     }
