@@ -501,7 +501,13 @@ IMPORTANT: Severity values are ALWAYS lowercase: 'critical', 'major', 'warning',
 Common Node properties: name, role (spine/leaf), model, address, serial, fabricSt (status)
 Common Fabric properties: name, health, status
 Common Fault properties: code, severity, descr, cause, created
-Common Anomaly properties: name, severity, category, details, lastSeen
+Common Anomaly properties: name (e.g. VPC_DOWN), severity, category, details, fabric, lastSeen
+  IMPORTANT: When querying an Anomaly, you MUST always return BOTH `a.details` and `a.fabric`
+  alongside name/severity. The `details` field contains the human-readable root cause
+  (which leaf/spine, which interface, which vPC name) and the `fabric` field names the
+  ACI fabric it came from. Without these, the answer cannot say WHERE the issue is.
+  An Anomaly has NO `affects` or `fix` property - do not invent them. There is no
+  `Resource` label in the graph.
 Common Subnet properties: ip, scope, bd, tenant
 
 === EXAMPLES ===
@@ -580,12 +586,14 @@ RETURN t.name AS tenant_name,
        collect(a.name) AS anomalies,
        collect(a.severity) AS severities
 
-EXAMPLE 11 - Details about a specific anomaly:
-Question: "Tell me about the ENDPOINT_TRAFFIC_SCORE_UNHEALTHY anomaly"
-MATCH (a:Anomaly {{name: 'ENDPOINT_TRAFFIC_SCORE_UNHEALTHY'}})
+EXAMPLE 11 - Details about a specific anomaly (USE THIS PATTERN for ANY "tell me about
+this anomaly" / "what is anomaly X" / "details about anomaly X" question - all of these
+need `a.details` and `a.fabric` or the answer cannot describe what actually happened):
+Question: "Tell me about the VPC_DOWN anomaly"
+MATCH (a:Anomaly {{name: 'VPC_DOWN'}})
 OPTIONAL MATCH (a)-[:AFFECTS]->(t:Tenant)
 OPTIONAL MATCH (f:Fabric)-[:HAS_ANOMALY]->(a)
-RETURN a.name, a.severity, a.category, a.details,
+RETURN a.name, a.severity, a.category, a.details, a.fabric, a.lastSeen,
        collect(DISTINCT t.name) AS affected_tenants,
        collect(DISTINCT f.name) AS fabrics
 
@@ -678,11 +686,21 @@ CYPHER_PROMPT = PromptTemplate.from_template(CYPHER_GENERATION_TEMPLATE)
 # Concise template for direct user queries and suggestions - focus on actual data
 QA_TEMPLATE_CONCISE = """You are an expert Cisco ACI network operations assistant. Answer based on the query results provided.
 
+DOMAIN CONTEXT - ALWAYS REMEMBER:
+- This is Cisco ACI / Nexus Dashboard / Intersight, NOT AWS, Azure, or GCP.
+- "VPC" = Cisco Virtual Port Channel (pair of leaves presenting one logical link),
+  NEVER Virtual Private Cloud.
+- "Tenant" = an ACI tenant (policy/forwarding domain), NEVER a cloud-provider tenant.
+- "Fabric" = a Cisco ACI fabric (e.g. ams-aci), NEVER a cloud fabric.
+- Remediation must reference APIC / NX-OS / Nexus Dashboard, not cloud consoles.
+
 CRITICAL ACCURACY RULES:
 1. Base ALL facts, names, counts, and severities ONLY on the Query Results below
 2. If the results show an empty list [] or null/None, explicitly state "none found" or "0" - NEVER invent items
 3. Count items exactly as they appear - if you see ["item1"], that's exactly 1 item
 4. You MAY provide brief helpful context for items that DO exist in the results
+5. If `details` and `fabric` fields are present on an anomaly, USE them in the answer
+   - they describe exactly which leaf/vPC/interface is affected and in which fabric.
 
 FORMATTING STYLE:
 - Use natural English without excessive quotes
@@ -715,6 +733,19 @@ Answer:
 # Detailed template for graph node clicks - full report with context
 QA_TEMPLATE_DETAILED = """You are an expert Cisco ACI network operations assistant. Provide a comprehensive report.
 
+DOMAIN CONTEXT - ALWAYS REMEMBER:
+- This system is about Cisco ACI / Nexus Dashboard / Intersight, NOT AWS, Azure, or GCP.
+- "VPC" here is Cisco Virtual Port Channel (a pair of leaf switches presenting one logical
+  link to a downstream device), NEVER Virtual Private Cloud.
+- "Tenant" is an ACI tenant (an isolated policy and forwarding domain in the fabric),
+  NEVER a cloud-provider tenant.
+- "Fabric" is a Cisco ACI fabric named like 'ams-aci' / 'fp-fabric', NEVER a generic
+  cloud fabric.
+- "EPG" = Endpoint Group, "BD" = Bridge Domain, "VRF" = Virtual Routing & Forwarding,
+  "AVE" = Application Virtual Edge - all Cisco ACI constructs.
+- Remediation advice must reference ACI/NX-OS commands and APIC/Nexus Dashboard
+  consoles, not AWS/cloud consoles.
+
 CRITICAL ACCURACY RULES:
 1. Base ALL facts, names, counts, and severities ONLY on the Query Results below
 2. If the results show an empty list [] or null/None for something, explicitly state "none" or "0" - NEVER invent items
@@ -722,6 +753,9 @@ CRITICAL ACCURACY RULES:
 4. ONLY report anomaly/fault severities if they are EXPLICITLY shown in the results (e.g., "severity": "critical")
 5. You MAY provide helpful explanations for items that DO exist in the results
 6. You MAY suggest remediation steps for actual issues found in the results
+7. If `details` and/or `fabric` fields are present on an anomaly row, USE them in the
+   answer - they describe exactly which leaf/vPC/interface is affected and in which
+   fabric. Do NOT say "affected resources: none" when these fields contain that info.
 
 FORMATTING STYLE:
 - Use natural English without excessive quotes
