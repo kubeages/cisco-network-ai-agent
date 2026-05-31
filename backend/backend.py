@@ -1680,6 +1680,19 @@ async def query_intersight_with_llm(question: str, chat_history: str = "") -> tu
             tools_data = tools_response.json()
             tools = [t["name"] for t in tools_data.get("tools", [])]
 
+            # Globally exclude MCP tools known to be broken in the deployed Intersight
+            # MCP version (1.0.16). These GET-by-MOID tools all receive 'undefined' for
+            # the moid argument no matter how we pass it, then return HTTP 404. Letting
+            # the LLM pick any of them produces the "Cannot execute the request. The
+            # requested object 'undefined' does not exist" error users see in chat.
+            # See memory/project_intersight_mcp_bugs.md for the diagnosis.
+            BROKEN_MCP_TOOLS = {
+                "get_server_details",
+                "get_server_profile",
+                "get_server_telemetry",
+            }
+            tools = [t for t in tools if t not in BROKEN_MCP_TOOLS]
+
             if not tools:
                 return ("No Intersight tools available.", [])
 
