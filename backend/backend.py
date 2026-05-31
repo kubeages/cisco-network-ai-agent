@@ -1650,7 +1650,14 @@ async def query_intersight_with_llm(question: str, chat_history: str = "") -> tu
             # we route everything through list_compute_servers and post-filter the response
             # in Python (see "Post-filter" block below). The MCP also ignores the OData filter
             # parameter so server-side filtering doesn't help either.
-            # Health/telemetry queries (server health, metrics)
+            #
+            # If the user asked about CPU/memory/health/etc. for a SPECIFIC server we know in
+            # Neo4j, prefer list_compute_servers + post-filter: the PhysicalSummary record
+            # already includes CpuCapacity, AvailableMemory, AlarmSummary, OperPowerState etc.
+            # This avoids the broken telemetry tool while still answering the question.
+            elif server_moid and ("cpu" in question_lower or "memory" in question_lower or "health" in question_lower or "hardware" in question_lower or "temperature" in question_lower):
+                candidate_tools = [t for t in tools if "list" in t.lower() and "server" in t.lower() and "profile" not in t.lower()]
+            # Health/telemetry queries WITHOUT a specific server (whole-fleet view)
             elif "health" in question_lower or "telemetry" in question_lower or "cpu" in question_lower or "memory" in question_lower or "temperature" in question_lower:
                 candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["health", "telemetry", "statistics"])]
             # Server/compute keywords
