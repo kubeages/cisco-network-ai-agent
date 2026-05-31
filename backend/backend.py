@@ -1083,6 +1083,26 @@ def validate_query_feasibility(question: str, capabilities: dict) -> tuple[bool,
     Returns (is_feasible, error_message)
     """
     question_lower = question.lower()
+    import re as _re
+    _quoted = _re.findall(r"['\"]([^'\"]+)['\"]", question)
+
+    # If the question targets a known IntersightServer (quoted entity exists in Neo4j as
+    # IntersightServer), it can be answered from Intersight + Neo4j enrichment without
+    # needing ND. Skip the ND gate so the router can pick the right path. This catches
+    # questions like "What is the current network connectivity status for 'C225-X'?".
+    targets_intersight_server = False
+    if _quoted and capabilities.get('intersight_available'):
+        try:
+            for entity_name in _quoted:
+                res = graph.query(
+                    "MATCH (s:IntersightServer {name: $name}) RETURN s.moid LIMIT 1",
+                    params={"name": entity_name}
+                )
+                if res:
+                    targets_intersight_server = True
+                    break
+        except Exception:
+            pass
 
     # Check for APIC-specific queries
     apic_keywords = ['epg', 'endpoint group', 'tenant', 'contract', 'app profile',
@@ -1101,8 +1121,11 @@ def validate_query_feasibility(question: str, capabilities: dict) -> tuple[bool,
             "\n💡 Try asking about current health, fabrics, or device status instead."
         )
 
-    # Check for ND/MCP-specific queries
-    if 'live' in question_lower or 'current' in question_lower or 'health' in question_lower:
+    # Check for ND/MCP-specific queries (skip when the question targets a known
+    # IntersightServer - we can answer from Intersight + Neo4j without ND).
+    if not targets_intersight_server and (
+        'live' in question_lower or 'current' in question_lower or 'health' in question_lower
+    ):
         if not capabilities['nd_available']:
             return False, (
                 "⚠️ This query requires Nexus Dashboard operational data which is currently unavailable. "
