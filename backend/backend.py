@@ -1089,6 +1089,47 @@ def check_mcp_health(mcp_url: str, mcp_name: str, health_endpoint: str = "/healt
         return {'available': False, 'error': str(e)[:50]}
 
 
+def check_nd_mcp_real_health(mcp_url: str) -> dict:
+    """
+    Deeper health check for the ND MCP: verifies the MCP can actually authenticate
+    with the configured Nexus Dashboard cluster, not just that the MCP service is up.
+
+    POSTs to /api/clusters/default/test which makes a live login attempt against ND.
+    Returns available=True only when status is "success"; if the MCP is reachable but
+    cannot reach/authenticate to ND, returns available=False with the ND error.
+    """
+    try:
+        import httpx
+        with httpx.Client(timeout=8.0, verify=False) as client:
+            # First make sure the MCP web API itself is responsive
+            health = client.get(f"{mcp_url}/api/health")
+            if health.status_code != 200:
+                return {'available': False, 'error': f"MCP /api/health HTTP {health.status_code}"}
+
+            # Now verify the underlying ND connection
+            r = client.post(f"{mcp_url}/api/clusters/default/test")
+            if r.status_code != 200:
+                return {'available': False, 'error': f"cluster test HTTP {r.status_code}"}
+
+            try:
+                body = r.json()
+            except Exception:
+                return {'available': False, 'error': 'cluster test returned non-JSON'}
+
+            status = (body.get('status') or '').lower()
+            if status == 'success':
+                return {'available': True, 'error': None}
+
+            message = body.get('message') or 'ND test failed'
+            return {'available': False, 'error': message[:80]}
+    except httpx.TimeoutException:
+        return {'available': False, 'error': 'Timeout'}
+    except httpx.ConnectError:
+        return {'available': False, 'error': 'Connection refused'}
+    except Exception as e:
+        return {'available': False, 'error': str(e)[:80]}
+
+
 def get_data_source_capabilities():
     """
     Check which data sources are available in Neo4j and MCP servers.
@@ -1104,8 +1145,11 @@ def get_data_source_capabilities():
 
         sources = {row['source']: row.get('provides', '') for row in result}
 
-        # Check MCP server health
-        nd_mcp_status = check_mcp_health(MCP_SERVER_URL, "ND MCP", "/api/health") if MCP_ENABLED and MCP_SERVER_URL else {'available': False, 'error': 'Disabled'}
+        # Check MCP server health.
+        # For ND MCP, the bare /api/health endpoint returns 200 even when the underlying
+        # Nexus Dashboard auth is broken, so we use a deeper probe that actually attempts
+        # login against the configured cluster. See check_nd_mcp_real_health.
+        nd_mcp_status = check_nd_mcp_real_health(MCP_SERVER_URL) if MCP_ENABLED and MCP_SERVER_URL else {'available': False, 'error': 'Disabled'}
         intersight_mcp_status = check_mcp_health(INTERSIGHT_MCP_URL, "Intersight MCP", "/health") if INTERSIGHT_MCP_ENABLED else {'available': False, 'error': 'Disabled'}
 
         capabilities = {
