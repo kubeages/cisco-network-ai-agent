@@ -2549,7 +2549,8 @@ with gr.Blocks(theme=gr.themes.Base(), title="Network AI Agent", css=custom_css,
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
-app: FastAPI = demo.fastapi_app
+# Access the underlying FastAPI app
+app: FastAPI = demo.app
 
 @app.get("/api/capabilities")
 async def get_capabilities_proxy():
