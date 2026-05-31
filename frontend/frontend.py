@@ -1870,8 +1870,11 @@ footer {
 """
 
 # JavaScript to handle messages from iframe
-js_code = """
+js_code = f"""
 <script>
+// Backend API URL for MCP status checks
+window.BACKEND_API_URL = '{BACKEND_CAPABILITIES_URL}';
+
 window.addEventListener('message', function(event) {
     if (event.data && event.data.type === 'nodeClick') {
         console.log('Node click received:', event.data);
@@ -2221,7 +2224,7 @@ function() {
             return;
         }
 
-        fetch('/api/capabilities')
+        fetch(window.BACKEND_API_URL || 'http://backend-api:8000/api/capabilities')
             .then(response => response.json())
             .then(data => {
                 var ndStatus = (data.mcp_health && data.mcp_health.nd_mcp) || { available: false, error: 'Unknown' };
