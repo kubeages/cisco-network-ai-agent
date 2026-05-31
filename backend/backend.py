@@ -1883,10 +1883,13 @@ Selected tool:"""
                     endpoint_rows = graph.query(
                         """
                         MATCH (s:IntersightServer {moid: $moid})-[r:CONNECTED_TO]->(e:Endpoint)
-                        OPTIONAL MATCH (e)-[:BELONGS_TO]->(epg:EPG)
+                        OPTIONAL MATCH (e)-[:MEMBER_OF]->(epg:EPG)
+                        OPTIONAL MATCH (epg)<-[:HAS_EPG]-(ap:AppProfile)<-[:HAS_AP]-(t:Tenant)
                         RETURN e.mac AS mac, e.ip AS ip,
                                r.interface_name AS interface,
-                               epg.name AS epg
+                               epg.name AS epg,
+                               ap.name AS app_profile,
+                               t.name AS tenant
                         ORDER BY r.interface_name
                         """,
                         params={"moid": server_moid}
@@ -2880,7 +2883,7 @@ def get_graph_data():
     query = """
     MATCH (n)
     OPTIONAL MATCH (n)-[r]->(m)
-    OPTIONAL MATCH (tenant:Tenant)-[:HAS_APP_PROFILE|HAS_EPG|HAS_VRF|HAS_BRIDGE_DOMAIN*1..3]->(n)
+    OPTIONAL MATCH (tenant:Tenant)-[:HAS_AP|HAS_EPG|HAS_VRF|HAS_BD*1..3]->(n)
     RETURN
         id(n) AS source_id,
         labels(n) AS source_labels,
