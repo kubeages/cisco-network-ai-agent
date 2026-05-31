@@ -571,64 +571,139 @@ def process_intersight_data(driver, mcp_url=None):
         servers = servers_response.results
         print(f"  📊 Found {len(servers)} servers in Intersight")
 
+        # Helper: paginate any Intersight list SDK call (default page size is 100)
+        def _fetch_all(list_fn, label, page_size=1000):
+            results = []
+            skip = 0
+            while True:
+                try:
+                    resp = list_fn(top=page_size, skip=skip)
+                except TypeError:
+                    # SDK call doesn't accept top/skip kwargs - single shot
+                    resp = list_fn()
+                    if resp and hasattr(resp, 'results'):
+                        results.extend(resp.results)
+                    return results
+                if not resp or not hasattr(resp, 'results') or not resp.results:
+                    break
+                results.extend(resp.results)
+                if len(resp.results) < page_size:
+                    break
+                skip += page_size
+                if skip > 50000:  # safety stop
+                    print(f"    ⚠️  {label} pagination hit safety limit at {skip}")
+                    break
+            return results
+
         # Query ALL adapters once (more efficient than per-server queries)
         # Then match them to servers by parent MOID in Python
-        print(f"  📡 Querying all adapter host ethernet interfaces...")
+        print(f"  📡 Querying all adapter host ethernet interfaces (paginated)...")
         all_adapters = []
         adapters_by_parent = {}
         try:
-            # Query without filter to get all adapters
-            all_adapters_response = adapter_instance.get_adapter_host_eth_interface_list()
-            if all_adapters_response and hasattr(all_adapters_response, 'results'):
-                all_adapters = all_adapters_response.results
-                print(f"    Found {len(all_adapters)} total adapters in system")
+            all_adapters = _fetch_all(adapter_instance.get_adapter_host_eth_interface_list, "host_eth_interface")
+            print(f"    Found {len(all_adapters)} total adapters in system")
 
-                # Group adapters by adapter.Unit MOID first (direct parent)
-                # We'll need to map adapter.Unit MOIDs to compute MOIDs separately
-                adapters_by_unit = {}
-                for adapter in all_adapters:
-                    adapter_unit = getattr(adapter, 'parent', None)
-                    if adapter_unit:
-                        unit_moid = getattr(adapter_unit, 'moid', None)
-                        if unit_moid:
-                            if unit_moid not in adapters_by_unit:
-                                adapters_by_unit[unit_moid] = []
-                            adapters_by_unit[unit_moid].append(adapter)
+            # Group adapters by adapter.Unit MOID first (direct parent)
+            adapters_by_unit = {}
+            for adapter in all_adapters:
+                adapter_unit = getattr(adapter, 'parent', None)
+                if adapter_unit:
+                    unit_moid = getattr(adapter_unit, 'moid', None)
+                    if unit_moid:
+                        if unit_moid not in adapters_by_unit:
+                            adapters_by_unit[unit_moid] = []
+                        adapters_by_unit[unit_moid].append(adapter)
 
-                print(f"    Grouped {len(all_adapters)} adapters by {len(adapters_by_unit)} adapter.Units")
+            print(f"    Grouped {len(all_adapters)} adapters by {len(adapters_by_unit)} adapter.Units")
 
-                # Now query adapter.Unit objects to get their compute parent references
-                print(f"  📡 Querying adapter units to find compute mappings...")
-                try:
-                    from intersight.api import adapter_api as adapter_api_module
-                    # Reuse the same adapter_instance or create new one
-                    units_response = adapter_instance.get_adapter_unit_list()
-                    if units_response and hasattr(units_response, 'results'):
-                        units = units_response.results
-                        print(f"    Found {len(units)} adapter units")
+            # Now query adapter.Unit objects to get their compute parent references
+            print(f"  📡 Querying adapter units to find compute mappings (paginated)...")
+            try:
+                units = _fetch_all(adapter_instance.get_adapter_unit_list, "adapter_unit")
+                print(f"    Found {len(units)} adapter units")
 
-                        # Map adapter.Unit MOID → compute MOID
-                        for unit in units:
-                            unit_moid = getattr(unit, 'moid', None)
-                            # Try to find compute reference
-                            compute_ref = (getattr(unit, 'compute_blade', None) or
-                                          getattr(unit, 'compute_rack_unit', None) or
-                                          getattr(unit, 'registered_device', None))
+                # Map adapter.Unit MOID → compute MOID
+                # We index under MULTIPLE keys so the per-server lookup can hit on any of them:
+                # the unit's direct compute_blade.moid, compute_rack_unit.moid, and registered_device.moid.
+                for unit in units:
+                    unit_moid = getattr(unit, 'moid', None)
+                    if not unit_moid or unit_moid not in adapters_by_unit:
+                        continue
+                    unit_adapters = adapters_by_unit[unit_moid]
 
-                            if unit_moid and compute_ref:
-                                compute_moid = getattr(compute_ref, 'moid', None)
-                                if compute_moid and unit_moid in adapters_by_unit:
-                                    # Transfer adapters from unit mapping to compute mapping
-                                    if compute_moid not in adapters_by_parent:
-                                        adapters_by_parent[compute_moid] = []
-                                    adapters_by_parent[compute_moid].extend(adapters_by_unit[unit_moid])
+                    candidate_moids = set()
+                    for ref_attr in ('compute_blade', 'compute_rack_unit', 'registered_device'):
+                        ref = getattr(unit, ref_attr, None)
+                        if ref:
+                            ref_moid = getattr(ref, 'moid', None)
+                            if ref_moid:
+                                candidate_moids.add(ref_moid)
 
-                        print(f"    Mapped to {len(adapters_by_parent)} compute servers")
-                        print(f"    Sample compute MOIDs: {list(adapters_by_parent.keys())[:3]}")
-                except Exception as e:
-                    print(f"    ⚠️  Unit query failed: {e}")
+                    for cmoid in candidate_moids:
+                        if cmoid not in adapters_by_parent:
+                            adapters_by_parent[cmoid] = []
+                        adapters_by_parent[cmoid].extend(unit_adapters)
+
+                print(f"    Mapped to {len(adapters_by_parent)} compute MOIDs")
+            except Exception as e:
+                print(f"    ⚠️  Unit query failed: {e}")
         except Exception as e:
             print(f"    ⚠️  Adapter query failed: {e}")
+
+        # Per-server fallback: for servers PhysicalSummary didn't get covered by the bulk index,
+        # query adapter host eth interfaces directly using a filter on the source compute MOID.
+        # This catches standalone C-series and IMM-managed servers whose adapter.Unit references
+        # don't line up with the keys we already indexed.
+        print(f"  🔁 Building per-server fallback index for uncovered servers...")
+        fallback_added = 0
+        for server in servers:
+            server_moid = getattr(server, 'moid', None)
+            if not server_moid:
+                continue
+            # Candidate MOIDs to check coverage for this server
+            check_moids = {server_moid}
+            registered_device = getattr(server, 'registered_device', None)
+            if registered_device:
+                rd_moid = getattr(registered_device, 'moid', None)
+                if rd_moid:
+                    check_moids.add(rd_moid)
+            source_object_moid = getattr(server, 'source_object_id', None)
+            if source_object_moid:
+                check_moids.add(source_object_moid)
+
+            if any(m in adapters_by_parent for m in check_moids):
+                continue  # Already covered by bulk index
+
+            # Try filtered query: most reliable for IMM/standalone is filter by Compute*.Moid
+            # We try the source_object_id (actual compute.Blade/compute.RackUnit MOID) first.
+            source_type = getattr(server, 'source_object_type', '') or ''
+            filter_moid = source_object_moid or server_moid
+            filter_clauses = []
+            if 'blade' in source_type.lower():
+                filter_clauses.append(f"ComputeBlade.Moid eq '{filter_moid}'")
+            elif 'rack' in source_type.lower():
+                filter_clauses.append(f"ComputeRackUnit.Moid eq '{filter_moid}'")
+            else:
+                filter_clauses.append(f"ComputeBlade.Moid eq '{filter_moid}'")
+                filter_clauses.append(f"ComputeRackUnit.Moid eq '{filter_moid}'")
+
+            found_for_server = []
+            for clause in filter_clauses:
+                try:
+                    resp = adapter_instance.get_adapter_host_eth_interface_list(filter=clause)
+                    if resp and hasattr(resp, 'results') and resp.results:
+                        found_for_server.extend(resp.results)
+                except Exception as e:
+                    print(f"    ⚠️  Fallback adapter query failed for {getattr(server,'name','?')} ({clause}): {e}")
+
+            if found_for_server:
+                adapters_by_parent[server_moid] = found_for_server
+                fallback_added += 1
+                print(f"    ➕ Fallback: '{getattr(server,'name','?')}' got {len(found_for_server)} adapter(s)")
+
+        if fallback_added:
+            print(f"    ✅ Fallback added adapters for {fallback_added} previously uncovered servers")
 
         # Debug: Check sample ACI endpoint MACs to see format
         print(f"  🔍 Checking sample ACI endpoint MACs in Neo4j...")
@@ -733,12 +808,15 @@ def process_intersight_data(driver, mcp_url=None):
 
                     # Step 3: Get adapters for this server from pre-grouped dictionary
                     try:
-                        # Adapters are children of adapter.Unit objects, which belong to compute objects
-                        # PhysicalSummary.registered_device points to the actual compute object
-                        # Try looking up by both Summary MOID and RegisteredDevice MOID
+                        # PhysicalSummary identifies the underlying compute object via several MOIDs.
+                        # Try all of them since the bulk index uses whichever the adapter.Unit references.
                         server_adapters = adapters_by_parent.get(server_moid, [])
 
-                        # If not found, try registered_device MOID
+                        if not server_adapters:
+                            source_object_moid = getattr(server, 'source_object_id', None)
+                            if source_object_moid:
+                                server_adapters = adapters_by_parent.get(source_object_moid, [])
+
                         if not server_adapters:
                             registered_device = getattr(server, 'registered_device', None)
                             if registered_device:
