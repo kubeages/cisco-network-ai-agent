@@ -597,6 +597,26 @@ RETURN a.name, a.severity, a.category, a.details, a.fabric, a.lastSeen,
        collect(DISTINCT t.name) AS affected_tenants,
        collect(DISTINCT f.name) AS fabrics
 
+EXAMPLE 11b - Details about ONE SPECIFIC anomaly instance (graph-click case where the
+user gives a uuid). Multiple anomalies often share the same name (e.g. VPC_DOWN exists
+once per affected vPC), so filtering by uuid returns ONLY that one row - the right
+behaviour when the user clicked one specific node on the topology map:
+Question: "Tell me about the specific anomaly with uuid 'VPC394994828872'"
+MATCH (a:Anomaly {{uuid: 'VPC394994828872'}})
+OPTIONAL MATCH (a)-[:AFFECTS]->(t:Tenant)
+OPTIONAL MATCH (f:Fabric)-[:HAS_ANOMALY]->(a)
+RETURN a.name, a.severity, a.category, a.details, a.fabric, a.lastSeen,
+       collect(DISTINCT t.name) AS affected_tenants,
+       collect(DISTINCT f.name) AS fabrics
+
+EXAMPLE 11c - Details about ONE SPECIFIC fault instance by uuid (graph-click case for
+Fault nodes - same rationale as 11b, faults can share codes across many objects):
+Question: "Tell me about the specific fault with uuid 'F123456'"
+MATCH (fault:Fault {{uuid: 'F123456'}})
+OPTIONAL MATCH (fault)<-[:HAS_FAULT]-(n)
+RETURN fault.code, fault.severity, fault.descr, fault.cause, fault.created,
+       labels(n)[0] AS affected_type, n.name AS affected_object
+
 EXAMPLE 12 - Anomalies affecting a specific tenant:
 Question: "What anomalies affect the flexpod tenant?"
 MATCH (a:Anomaly)-[:AFFECTS]->(t:Tenant)

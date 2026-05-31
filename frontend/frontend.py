@@ -2511,6 +2511,25 @@ with gr.Blocks(theme=gr.themes.Base(), title="Network AI Agent", css=custom_css,
             # Check if node has a parent tenant
             parent_tenant = node_properties.get("_parent_tenant")
 
+            # For instance-style nodes that share names across the graph (Anomaly + Fault),
+            # use the uuid from properties to make the query unambiguous. Without this,
+            # clicking one VPC_DOWN anomaly node returns data about ALL VPC_DOWN anomalies.
+            uuid = node_properties.get("uuid")
+            if node_type == "Anomaly" and uuid:
+                question = (f"Tell me about the specific anomaly with uuid '{uuid}' "
+                            f"(name: '{node_label}'). Use the details and fabric fields "
+                            f"to describe exactly which resource is affected, then explain "
+                            f"its severity and how to remediate it.")
+                selected_display = f"**Selected:** Anomaly - *{node_label}* (uuid: {uuid})"
+                return question, selected_display
+            if node_type == "Fault" and uuid:
+                question = (f"Tell me about the specific fault with uuid '{uuid}' "
+                            f"(code: '{node_label}'). Use the descr and cause fields to "
+                            f"describe exactly which object is affected, then explain "
+                            f"its severity and how to resolve it.")
+                selected_display = f"**Selected:** Fault - *{node_label}* (uuid: {uuid})"
+                return question, selected_display
+
             # Generate contextual query
             template = NODE_QUERY_TEMPLATES.get(node_type, NODE_QUERY_TEMPLATES["Unknown"])
 
