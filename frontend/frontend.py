@@ -2545,4 +2545,23 @@ with gr.Blocks(theme=gr.themes.Base(), title="Network AI Agent", css=custom_css,
         outputs=[graph_html]
     )
 
+# Add FastAPI route for MCP status (proxy to backend)
+from fastapi import FastAPI
+from fastapi.responses import JSONResponse
+
+app: FastAPI = demo.fastapi_app
+
+@app.get("/api/capabilities")
+async def get_capabilities_proxy():
+    """Proxy endpoint for frontend JavaScript to check MCP status"""
+    try:
+        response = requests.get(BACKEND_CAPABILITIES_URL, timeout=5)
+        response.raise_for_status()
+        return JSONResponse(content=response.json())
+    except requests.exceptions.RequestException as e:
+        return JSONResponse(
+            content={"error": str(e), "mcp_health": {"nd_mcp": {"available": False, "error": "Backend unreachable"}, "intersight_mcp": {"available": False, "error": "Backend unreachable"}}},
+            status_code=503
+        )
+
 demo.launch(server_name="0.0.0.0", server_port=7860, pwa=False)
