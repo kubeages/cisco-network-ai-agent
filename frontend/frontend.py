@@ -2226,8 +2226,8 @@ function updateMCPStatus() {
     fetch('/api/capabilities')
         .then(response => response.json())
         .then(data => {
-            var ndStatus = data.mcp_health?.nd_mcp || { available: false, error: 'Unknown' };
-            var isStatus = data.mcp_health?.intersight_mcp || { available: false, error: 'Unknown' };
+            var ndStatus = (data.mcp_health && data.mcp_health.nd_mcp) || { available: false, error: 'Unknown' };
+            var isStatus = (data.mcp_health && data.mcp_health.intersight_mcp) || { available: false, error: 'Unknown' };
 
             // Update ND MCP badge
             var ndDot = ndBadge.querySelector('.status-dot');
