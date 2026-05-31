@@ -1767,7 +1767,7 @@ async def query_intersight_with_llm(question: str, chat_history: str = "") -> tu
             # MgmtIpAddress, KvmIpAddress, etc. We additionally enrich the answer below
             # with Endpoint nodes already correlated to this server in Neo4j (real MACs +
             # ACI-learned IPs).
-            elif server_moid and ("mac" in question_lower or "vnic" in question_lower or "adapter" in question_lower or "connectivity" in question_lower or "network" in question_lower):
+            elif server_moid and any(kw in question_lower for kw in ("mac", "vnic", "adapter", "connectivity", "network", "epg", "tenant", "fabric", "attached", "attach")):
                 candidate_tools = [t for t in tools if "list" in t.lower() and "server" in t.lower() and "profile" not in t.lower()]
             # Network adapter/vNIC keywords (no specific server - fleet-wide)
             elif "mac" in question_lower or "vnic" in question_lower or "adapter" in question_lower:
@@ -1901,7 +1901,7 @@ Selected tool:"""
             # a known server. The MCP doesn't expose a per-server host-eth-interface tool, but
             # the ingestor already correlates server vNICs to ACI Endpoints by MAC. Pull that
             # data so the LLM can answer "what adapters does this server have" properly.
-            if server_moid and ("mac" in question_lower or "vnic" in question_lower or "adapter" in question_lower or "connectivity" in question_lower or "network" in question_lower):
+            if server_moid and any(kw in question_lower for kw in ("mac", "vnic", "adapter", "connectivity", "network", "epg", "tenant", "fabric", "attached", "attach")):
                 try:
                     endpoint_rows = graph.query(
                         """
