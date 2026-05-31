@@ -2231,9 +2231,22 @@ function() {
             return;
         }
 
-        fetch(window.BACKEND_API_URL || 'http://backend-api:8000/api/capabilities')
-            .then(response => response.json())
-            .then(data => {
+        // Trigger hidden button to fetch capabilities server-side
+        var refreshBtn = document.querySelector('#mcp-refresh-btn button');
+        if (refreshBtn) {
+            refreshBtn.click();
+        }
+
+        // Wait a bit for the update, then read from the JSON component
+        setTimeout(function() {
+            var jsonComponent = document.querySelector('#mcp-status-api textarea');
+            if (!jsonComponent || !jsonComponent.value) {
+                console.log('[GBAIA] MCP status data not available yet');
+                return;
+            }
+
+            try {
+                var data = JSON.parse(jsonComponent.value);
                 var ndStatus = (data.mcp_health && data.mcp_health.nd_mcp) || { available: false, error: 'Unknown' };
                 var isStatus = (data.mcp_health && data.mcp_health.intersight_mcp) || { available: false, error: 'Unknown' };
 
@@ -2264,10 +2277,10 @@ function() {
                 }
 
                 console.log('[GBAIA] MCP status updated - ND:', ndStatus.available, 'IS:', isStatus.available);
-            })
-            .catch(error => {
-                console.error('[GBAIA] Failed to fetch MCP status:', error);
-            });
+            } catch (error) {
+                console.error('[GBAIA] Failed to parse MCP status:', error);
+            }
+        }, 500);
     }
 
     // Initial update and refresh every 30 seconds
@@ -2292,8 +2305,11 @@ with gr.Blocks(theme=gr.themes.Base(), title="Network AI Agent", css=custom_css,
     # State for dynamic suggestions
     suggestions_state = gr.State(initial_suggestions)
 
-    # Hidden component for MCP status API (accessible via /api/mcp_status)
-    mcp_status_output = gr.JSON(visible=False, elem_id="mcp-status-api")
+    # Hidden component for MCP status API
+    mcp_status_output = gr.JSON(visible=False, elem_id="mcp-status-api", value=fetch_capabilities())
+
+    # Hidden button to refresh MCP status (triggered by JavaScript)
+    mcp_refresh_btn = gr.Button(visible=False, elem_id="mcp-refresh-btn")
 
     # Hidden component to receive node click data from iframe (hidden via CSS, not visible=False)
     node_click_data = gr.Textbox(elem_id="node-click-data", label="", container=False)
@@ -2563,6 +2579,12 @@ with gr.Blocks(theme=gr.themes.Base(), title="Network AI Agent", css=custom_css,
         fn=fetch_capabilities,
         outputs=[mcp_status_output],
         api_name="capabilities"
+    )
+
+    # MCP refresh button handler (triggered by JavaScript every 30s)
+    mcp_refresh_btn.click(
+        fn=fetch_capabilities,
+        outputs=[mcp_status_output]
     )
 
 # Add proxy endpoint for browser JavaScript to access backend capabilities
