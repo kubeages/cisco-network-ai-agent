@@ -1331,6 +1331,73 @@ footer {
     color: #8b949e;
     font-weight: 400;
 }
+.header-controls {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+/* === MCP STATUS BADGES === */
+.mcp-status-badges {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+.mcp-badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.08);
+    cursor: pointer;
+    transition: all 0.3s ease;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    user-select: none;
+}
+.mcp-badge:hover {
+    background: rgba(255, 255, 255, 0.15);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+.mcp-badge:active {
+    transform: translateY(0);
+}
+.mcp-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: #c9d1d9;
+    letter-spacing: 0.5px;
+}
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    transition: all 0.3s ease;
+}
+.status-dot.online {
+    background: #00ff88;
+    box-shadow: 0 0 8px rgba(0, 255, 136, 0.8), 0 0 16px rgba(0, 255, 136, 0.4);
+    animation: pulse-glow 2s ease-in-out infinite;
+}
+.status-dot.offline {
+    background: #ff4444;
+    box-shadow: 0 0 6px rgba(255, 68, 68, 0.6);
+}
+.status-dot.unknown {
+    background: #888888;
+    box-shadow: 0 0 4px rgba(136, 136, 136, 0.4);
+}
+@keyframes pulse-glow {
+    0%, 100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.7;
+        transform: scale(1.1);
+    }
+}
 
 /* === DATA SOURCE STATUS INDICATOR === */
 .status-indicator {
@@ -1690,6 +1757,16 @@ footer {
 }
 .light-mode .header-subtitle {
     color: #656d76;
+}
+.light-mode .mcp-badge {
+    background: rgba(9, 105, 218, 0.08);
+    border: 1px solid rgba(9, 105, 218, 0.2);
+}
+.light-mode .mcp-badge:hover {
+    background: rgba(9, 105, 218, 0.15);
+}
+.light-mode .mcp-label {
+    color: #1f2328;
 }
 .light-mode #theme-toggle {
     background: rgba(255, 255, 255, 0.75);
@@ -2134,6 +2211,68 @@ function() {
     }
     attach();
 }
+
+/* === MCP STATUS BADGES AUTO-UPDATE === */
+function updateMCPStatus() {
+    var ndBadge = document.getElementById('nd-mcp-badge');
+    var isBadge = document.getElementById('intersight-mcp-badge');
+
+    if (!ndBadge || !isBadge) {
+        console.log('[GBAIA] MCP badges not found, retrying...');
+        setTimeout(updateMCPStatus, 1000);
+        return;
+    }
+
+    fetch('/api/capabilities')
+        .then(response => response.json())
+        .then(data => {
+            var ndStatus = data.mcp_health?.nd_mcp || { available: false, error: 'Unknown' };
+            var isStatus = data.mcp_health?.intersight_mcp || { available: false, error: 'Unknown' };
+
+            // Update ND MCP badge
+            var ndDot = ndBadge.querySelector('.status-dot');
+            if (ndStatus.available) {
+                ndDot.className = 'status-dot online';
+                ndBadge.title = 'Nexus Dashboard MCP: Online';
+            } else if (ndStatus.error === 'Disabled') {
+                ndDot.className = 'status-dot unknown';
+                ndBadge.title = 'Nexus Dashboard MCP: Disabled';
+            } else {
+                ndDot.className = 'status-dot offline';
+                ndBadge.title = 'Nexus Dashboard MCP: Offline (' + ndStatus.error + ')';
+            }
+
+            // Update Intersight MCP badge
+            var isDot = isBadge.querySelector('.status-dot');
+            if (isStatus.available) {
+                isDot.className = 'status-dot online';
+                isBadge.title = 'Intersight MCP: Online';
+            } else if (isStatus.error === 'Disabled') {
+                isDot.className = 'status-dot unknown';
+                isBadge.title = 'Intersight MCP: Disabled';
+            } else {
+                isDot.className = 'status-dot offline';
+                isBadge.title = 'Intersight MCP: Offline (' + isStatus.error + ')';
+            }
+
+            console.log('[GBAIA] MCP status updated - ND:', ndStatus.available, 'IS:', isStatus.available);
+        })
+        .catch(error => {
+            console.error('[GBAIA] Failed to fetch MCP status:', error);
+        });
+}
+
+// Initial update and refresh every 30 seconds
+setTimeout(updateMCPStatus, 1000);
+setInterval(updateMCPStatus, 30000);
+
+// Click to force refresh
+document.addEventListener('click', function(e) {
+    if (e.target.closest('.mcp-badge')) {
+        console.log('[GBAIA] Manual MCP status refresh triggered');
+        updateMCPStatus();
+    }
+});
 """
 
 # --- Gradio Interface ---
@@ -2161,10 +2300,22 @@ with gr.Blocks(theme=gr.themes.Base(), title="Network AI Agent", css=custom_css,
                     <span class="header-accent">Network AI Agent</span>
                     <span class="header-subtitle">Graph-Based AI Agent for modern networks</span>
                 </div>
-                <button id="theme-toggle" title="Toggle light/dark mode">
-                    <svg id="theme-icon-sun" width="22" height="22" viewBox="0 0 24 24" fill="#ffcc00" stroke="#ffcc00" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><line x1="12" y1="1" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="6.34" y2="6.34"/><line x1="17.66" y1="17.66" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="6.34" y2="17.66"/><line x1="17.66" y1="6.34" x2="19.78" y2="4.22"/></svg>
-                    <svg id="theme-icon-moon" width="22" height="22" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-                </button>
+                <div class="header-controls">
+                    <div class="mcp-status-badges">
+                        <span class="mcp-badge" id="nd-mcp-badge" title="Checking Nexus Dashboard MCP status...">
+                            <span class="status-dot unknown"></span>
+                            <span class="mcp-label">ND</span>
+                        </span>
+                        <span class="mcp-badge" id="intersight-mcp-badge" title="Checking Intersight MCP status...">
+                            <span class="status-dot unknown"></span>
+                            <span class="mcp-label">IS</span>
+                        </span>
+                    </div>
+                    <button id="theme-toggle" title="Toggle light/dark mode">
+                        <svg id="theme-icon-sun" width="22" height="22" viewBox="0 0 24 24" fill="#ffcc00" stroke="#ffcc00" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><line x1="12" y1="1" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="6.34" y2="6.34"/><line x1="17.66" y1="17.66" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="6.34" y2="17.66"/><line x1="17.66" y1="6.34" x2="19.78" y2="4.22"/></svg>
+                        <svg id="theme-icon-moon" width="22" height="22" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                    </button>
+                </div>
             </div>""",
             elem_id="header-bar"
         )

@@ -1061,10 +1061,37 @@ def validate_query_feasibility(question: str, capabilities: dict) -> tuple[bool,
     return True, ""
 
 
+def check_mcp_health(mcp_url: str, mcp_name: str) -> dict:
+    """
+    Check if an MCP server is healthy and responsive.
+
+    Args:
+        mcp_url: Base URL of the MCP server
+        mcp_name: Name of the MCP service (for logging)
+
+    Returns:
+        dict with 'available' (bool) and 'error' (str or None)
+    """
+    try:
+        import httpx
+        with httpx.Client(timeout=2.0, verify=False) as client:
+            response = client.get(f"{mcp_url}/health")
+            if response.status_code == 200:
+                return {'available': True, 'error': None}
+            else:
+                return {'available': False, 'error': f"HTTP {response.status_code}"}
+    except httpx.TimeoutException:
+        return {'available': False, 'error': 'Timeout'}
+    except httpx.ConnectError:
+        return {'available': False, 'error': 'Connection refused'}
+    except Exception as e:
+        return {'available': False, 'error': str(e)[:50]}
+
+
 def get_data_source_capabilities():
     """
-    Check which data sources are available in Neo4j.
-    Returns dict with capability flags.
+    Check which data sources are available in Neo4j and MCP servers.
+    Returns dict with capability flags and MCP status.
     """
     try:
         query = """
@@ -1076,14 +1103,24 @@ def get_data_source_capabilities():
 
         sources = {row['source']: row.get('provides', '') for row in result}
 
+        # Check MCP server health
+        nd_mcp_status = check_mcp_health(MCP_SERVER_URL, "ND MCP") if MCP_ENABLED and MCP_SERVER_URL else {'available': False, 'error': 'Disabled'}
+        intersight_mcp_status = check_mcp_health(INTERSIGHT_MCP_URL, "Intersight MCP") if INTERSIGHT_MCP_ENABLED else {'available': False, 'error': 'Disabled'}
+
         capabilities = {
             'apic_available': 'apic' in sources,
             'nd_available': 'nexus_dashboard' in sources,
+            'intersight_available': 'intersight' in sources,
             'policy_model': 'apic' in sources,  # EPG, Tenant, Contracts
             'live_metrics': 'nexus_dashboard' in sources,  # MCP data
             'fabric_topology': 'nexus_dashboard' in sources,  # Basic fabric info
             'full_topology': 'apic' in sources and 'nexus_dashboard' in sources,
-            'sources': sources
+            'sources': sources,
+            # MCP health status
+            'mcp_health': {
+                'nd_mcp': nd_mcp_status,
+                'intersight_mcp': intersight_mcp_status
+            }
         }
 
         return capabilities
@@ -1093,11 +1130,16 @@ def get_data_source_capabilities():
         return {
             'apic_available': True,
             'nd_available': True,
+            'intersight_available': False,
             'policy_model': True,
             'live_metrics': True,
             'fabric_topology': True,
             'full_topology': True,
-            'sources': {}
+            'sources': {},
+            'mcp_health': {
+                'nd_mcp': {'available': False, 'error': 'Unknown'},
+                'intersight_mcp': {'available': False, 'error': 'Unknown'}
+            }
         }
 
 
@@ -2291,6 +2333,11 @@ def get_capabilities():
                 "available": capabilities['nd_available'],
                 "provides": "Operational Data (Health, Metrics, Anomalies, Compliance)",
                 "query_types": ["health", "metrics", "anomalies", "compliance"]
+            },
+            "intersight": {
+                "available": capabilities['intersight_available'],
+                "provides": "Compute/Server Data (UCS, Health, Telemetry)",
+                "query_types": ["server", "compute", "health", "telemetry"]
             }
         },
         "capabilities": {
@@ -2298,6 +2345,10 @@ def get_capabilities():
             "live_metrics": capabilities['live_metrics'],
             "fabric_topology": capabilities['fabric_topology'],
             "full_topology": capabilities['full_topology']
+        },
+        "mcp_health": {
+            "nd_mcp": capabilities['mcp_health']['nd_mcp'],
+            "intersight_mcp": capabilities['mcp_health']['intersight_mcp']
         },
         "suggested_queries": {
             "always_available": [
@@ -2313,7 +2364,12 @@ def get_capabilities():
                 "What is the current health status?",
                 "Show me anomalies",
                 "Check compliance status"
-            ] if capabilities['nd_available'] else []
+            ] if capabilities['nd_available'] else [],
+            "with_intersight": [
+                "Show all servers",
+                "What is the health of server X?",
+                "List compute resources"
+            ] if capabilities['intersight_available'] else []
         },
         "mode": "full" if capabilities['full_topology']
                 else ("apic_only" if capabilities['apic_available']
