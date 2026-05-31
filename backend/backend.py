@@ -1568,11 +1568,30 @@ async def query_intersight_with_llm(question: str, chat_history: str = "") -> tu
             question_lower = question.lower()
             candidate_tools = []
 
-            # Pre-extract quoted entities to detect FI pattern (e.g., "TS-FI-1-1")
-            import re as _re_early
-            _quoted_for_detection = _re_early.findall(r"['\"]([^'\"]+)['\"]", question)
-            _has_fi_entity = any(_re_early.search(r'\bfi\b|-fi-', e.lower()) for e in _quoted_for_detection)
+            # Step A: Extract quoted entities and look up MOIDs in Neo4j FIRST.
+            # We use this to pick a more precise tool (get_server_details, alarm filtering by MOID).
+            import re
+            quoted_entities = re.findall(r"['\"]([^'\"]+)['\"]", question)
+            _has_fi_entity = any(re.search(r'\bfi\b|-fi-', e.lower()) for e in quoted_entities)
 
+            server_moid = None
+            server_name = None
+            if quoted_entities:
+                for entity_name in quoted_entities:
+                    try:
+                        result = graph.query(
+                            "MATCH (s:IntersightServer {name: $name}) RETURN s.moid AS moid, s.name AS name LIMIT 1",
+                            params={"name": entity_name}
+                        )
+                        if result and len(result) > 0:
+                            server_moid = result[0].get('moid')
+                            server_name = result[0].get('name')
+                            print(f"🔍 Found server '{server_name}' with MOID: {server_moid}")
+                            break
+                    except Exception as e:
+                        print(f"⚠️ Error looking up server MOID: {e}")
+
+            # Step B: Tool selection
             # Alarm queries (prioritize before generic health)
             if "alarm" in question_lower:
                 candidate_tools = [t for t in tools if "alarm" in t.lower()]
@@ -1581,10 +1600,18 @@ async def query_intersight_with_llm(question: str, chat_history: str = "") -> tu
                 candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["fabric_interconnect", "network_element"])]
                 if not candidate_tools:
                     candidate_tools = [t for t in tools if "fabric" in t.lower() and "interconnect" in t.lower()]
+            # If we have a specific server MOID and the question is generic ("tell me about X"),
+            # prefer get_server_details over list_compute_servers. The MCP list filter is unreliable
+            # (returns all 33 servers regardless of Name filter), so MOID-based lookup is required
+            # to get the actual requested server back.
+            elif server_moid and "get_server_details" in tools and not any(
+                kw in question_lower for kw in ["telemetry", "cpu", "memory", "temperature", "mac", "vnic", "adapter", "policy", "bios", "boot"]
+            ):
+                candidate_tools = ["get_server_details"]
             # Health/telemetry queries (server health, metrics)
             elif "health" in question_lower or "telemetry" in question_lower or "cpu" in question_lower or "memory" in question_lower or "temperature" in question_lower:
                 candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["health", "telemetry", "statistics"])]
-            # Server/compute keywords (server_moid is set later, only check keyword presence here)
+            # Server/compute keywords
             elif "server" in question_lower or "ucs" in question_lower or "compute" in question_lower or "blade" in question_lower or "rack" in question_lower:
                 candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["server", "compute", "blade", "rack"]) and "profile" not in t.lower()]
             # Network adapter/vNIC keywords (for correlation)
@@ -1629,38 +1656,25 @@ Selected tool:"""
 
             print(f"🔧 Selected Intersight tool: {selected_tool}")
 
-            # Generate tool arguments based on question
+            # Step C: Generate tool arguments
             tool_arguments = {}
-
-            # Extract server name from question (quoted entities)
-            import re
-            quoted_entities = re.findall(r"['\"]([^'\"]+)['\"]", question)
-
-            # If query mentions a specific server, look up its MOID from Neo4j
-            server_moid = None
-            server_name = None
-            if quoted_entities:
-                for entity_name in quoted_entities:
-                    try:
-                        result = graph.query(
-                            "MATCH (s:IntersightServer {name: $name}) RETURN s.moid AS moid, s.name AS name LIMIT 1",
-                            params={"name": entity_name}
-                        )
-                        if result and len(result) > 0:
-                            server_moid = result[0].get('moid')
-                            server_name = result[0].get('name')
-                            print(f"🔍 Found server '{server_name}' with MOID: {server_moid}")
-                            break
-                    except Exception as e:
-                        print(f"⚠️ Error looking up server MOID: {e}")
 
             # Add server MOID to tool arguments if found
             if server_moid:
-                # Pass MOID to get/query tools
+                # Pass MOID to get/query tools (e.g. get_server_details, get_server_telemetry)
                 if any(kw in selected_tool.lower() for kw in ["get_server", "get_compute", "health", "telemetry", "statistics", "detail"]):
-                    tool_arguments["moid"] = server_moid
+                    # get_server_telemetry uses serverMoid, others use moid
+                    if "telemetry" in selected_tool.lower():
+                        tool_arguments["serverMoid"] = server_moid
+                    else:
+                        tool_arguments["moid"] = server_moid
                     print(f"📋 Passing server MOID to tool: {server_moid}")
-                # For list tools, use filter parameter with server name
+                # For list_alarms with a server MOID, filter by AffectedMoid
+                elif "alarm" in selected_tool.lower():
+                    tool_arguments["filter"] = f"AffectedMoid eq '{server_moid}'"
+                    print(f"📋 Filtering alarms by AffectedMoid: {server_moid}")
+                # For list tools, use filter parameter with server name (MCP often ignores this
+                # but harmless to try as a hint)
                 elif "list" in selected_tool.lower() and server_name:
                     tool_arguments["filter"] = f"Name eq '{server_name}'"
                     print(f"📋 Filtering by server name: {server_name}")
@@ -1668,7 +1682,7 @@ Selected tool:"""
             # For fabric_interconnect/network_element tools, filter by name from quoted entity
             if "fabric_interconnect" in selected_tool.lower() or "network_element" in selected_tool.lower():
                 for entity_name in quoted_entities:
-                    if _re_early.search(r'\bfi\b|-fi-', entity_name.lower()):
+                    if re.search(r'\bfi\b|-fi-', entity_name.lower()):
                         tool_arguments["filter"] = f"Name eq '{entity_name}'"
                         print(f"📋 Filtering fabric interconnect by name: {entity_name}")
                         break
@@ -1702,6 +1716,31 @@ Selected tool:"""
                 return (f"Failed to execute Intersight tool: {error_text}", [])
 
             result = execute_response.json()
+
+            # Post-filter: the Intersight MCP often ignores the OData `filter` parameter and
+            # returns ALL records. When we know which server/MOID the user asked about, trim the
+            # results list to matching entries so the LLM doesn't synthesize from the wrong row.
+            if "list" in selected_tool.lower() and (server_moid or server_name):
+                try:
+                    # The MCP response shape is {success, tool, parameters, result: {Results: [...]}}
+                    inner = result.get("result") if isinstance(result, dict) else None
+                    if isinstance(inner, dict) and isinstance(inner.get("Results"), list):
+                        all_rows = inner["Results"]
+                        target_name_lower = (server_name or "").lower()
+                        filtered = []
+                        for row in all_rows:
+                            row_moid = row.get("Moid")
+                            row_name = (row.get("Name") or "").lower()
+                            row_affected = (row.get("AffectedMoid") or "") if isinstance(row.get("AffectedMoid"), str) else ""
+                            if server_moid and (row_moid == server_moid or row_affected == server_moid):
+                                filtered.append(row)
+                            elif target_name_lower and row_name == target_name_lower:
+                                filtered.append(row)
+                        if filtered and len(filtered) != len(all_rows):
+                            print(f"🔎 Post-filtered {len(all_rows)} → {len(filtered)} result(s) matching server '{server_name or server_moid}'")
+                            inner["Results"] = filtered
+                except Exception as e:
+                    print(f"⚠️ Post-filter failed (continuing with raw result): {e}")
 
             # Track data source
             sources = [DataSource(
