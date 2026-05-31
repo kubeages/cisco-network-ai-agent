@@ -2221,31 +2221,9 @@ function() {
             return;
         }
 
-        // Gradio API uses two-step process: 1) POST to get event_id, 2) GET to fetch result
-        fetch('/gradio_api/call/capabilities', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ data: [] })
-        })
-            .then(function(response) { return response.json(); })
-            .then(function(eventData) {
-                // Step 2: Fetch the result using the event_id
-                return fetch('/gradio_api/call/capabilities/' + eventData.event_id);
-            })
-            .then(function(response) { return response.text(); })
-            .then(function(text) {
-                // Parse SSE format - find line starting with data:
-                var lines = text.split('\n');
-                var dataLine = null;
-                for (var i = 0; i < lines.length; i++) {
-                    if (lines[i].indexOf('data: ') === 0) {
-                        dataLine = lines[i];
-                        break;
-                    }
-                }
-                if (!dataLine) throw new Error('No data in response');
-
-                var data = JSON.parse(dataLine.substring(6))[0];
+        fetch('https://backend-api-gbaia.apps.fp-ocp.amsdmz.local/api/capabilities')
+            .then(response => response.json())
+            .then(data => {
                 var ndStatus = (data.mcp_health && data.mcp_health.nd_mcp) || { available: false, error: 'Unknown' };
                 var isStatus = (data.mcp_health && data.mcp_health.intersight_mcp) || { available: false, error: 'Unknown' };
 
@@ -2277,7 +2255,7 @@ function() {
 
                 console.log('[GBAIA] MCP status updated - ND:', ndStatus.available, 'IS:', isStatus.available);
             })
-            .catch(function(error) {
+            .catch(error => {
                 console.error('[GBAIA] Failed to fetch MCP status:', error);
             });
     }
