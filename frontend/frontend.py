@@ -2221,14 +2221,25 @@ function() {
             return;
         }
 
-        fetch('/run/capabilities', {
+        // Gradio API uses two-step process: 1) POST to get event_id, 2) GET to fetch result
+        fetch('/gradio_api/call/capabilities', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ data: [] })
         })
             .then(response => response.json())
-            .then(result => {
-                var data = result.data && result.data[0] ? result.data[0] : {};
+            .then(eventData => {
+                // Step 2: Fetch the result using the event_id
+                return fetch('/gradio_api/call/capabilities/' + eventData.event_id);
+            })
+            .then(response => response.text())
+            .then(text => {
+                // Parse SSE (Server-Sent Events) format
+                var lines = text.split('\n');
+                var dataLine = lines.find(function(line) { return line.startsWith('data: '); });
+                if (!dataLine) throw new Error('No data in response');
+
+                var data = JSON.parse(dataLine.substring(6))[0]; // Remove 'data: ' prefix and get first element
                 var ndStatus = (data.mcp_health && data.mcp_health.nd_mcp) || { available: false, error: 'Unknown' };
                 var isStatus = (data.mcp_health && data.mcp_health.intersight_mcp) || { available: false, error: 'Unknown' };
 
