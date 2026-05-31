@@ -2221,7 +2221,7 @@ function() {
             return;
         }
 
-        fetch('https://backend-api-gbaia.apps.fp-ocp.amsdmz.local/api/capabilities')
+        fetch('/api/capabilities')
             .then(response => response.json())
             .then(data => {
                 var ndStatus = (data.mcp_health && data.mcp_health.nd_mcp) || { available: false, error: 'Unknown' };
@@ -2554,5 +2554,16 @@ with gr.Blocks(theme=gr.themes.Base(), title="Network AI Agent", css=custom_css,
         outputs=[mcp_status_output],
         api_name="capabilities"
     )
+
+# Add proxy endpoint for browser JavaScript to access backend capabilities
+@demo.app.get("/api/capabilities")
+async def capabilities_proxy():
+    """Proxy backend capabilities to avoid CORS and SSL cert issues"""
+    import json
+    caps = fetch_capabilities()
+    if caps:
+        return caps
+    else:
+        return {"error": "Unable to fetch capabilities", "mcp_health": {"nd_mcp": {"available": False, "error": "Backend unavailable"}, "intersight_mcp": {"available": False, "error": "Backend unavailable"}}}
 
 demo.launch(server_name="0.0.0.0", server_port=7860, pwa=False)
