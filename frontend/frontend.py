@@ -2556,14 +2556,16 @@ with gr.Blocks(theme=gr.themes.Base(), title="Network AI Agent", css=custom_css,
     )
 
 # Add proxy endpoint for browser JavaScript to access backend capabilities
-@demo.app.get("/api/capabilities")
-async def capabilities_proxy():
+def capabilities_proxy():
     """Proxy backend capabilities to avoid CORS and SSL cert issues"""
-    import json
     caps = fetch_capabilities()
     if caps:
         return caps
     else:
         return {"error": "Unable to fetch capabilities", "mcp_health": {"nd_mcp": {"available": False, "error": "Backend unavailable"}, "intersight_mcp": {"available": False, "error": "Backend unavailable"}}}
+
+# Add route using FastAPI app directly
+from fastapi.responses import JSONResponse
+demo.app.add_api_route("/api/capabilities", capabilities_proxy, methods=["GET"], response_class=JSONResponse)
 
 demo.launch(server_name="0.0.0.0", server_port=7860, pwa=False)
