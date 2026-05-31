@@ -1984,6 +1984,16 @@ Question: {question}
 Intersight Data:
 {result_json}{truncation_note}
 
+IMPORTANT - If the JSON above contains a `correlatedEndpointsFromAci` array, those rows
+come from the Cisco ACI fabric (correlated by MAC). Each row has: interface (vNIC name
+like `ts-eth-a`/`ts-iscsi-a`), mac, ip, epg, app_profile, tenant. When answering ANY
+question about network adapters, vNICs, connectivity, EPGs, tenants, or "what is this
+server attached to", you MUST list each correlated endpoint with its EPG name, app
+profile, and tenant. Format example:
+  - vNIC `ts-eth-a` (MAC 00:25:B5:56:65:35) -> EPG `nodes` in AppProfile `titansphere` /
+    tenant `titansphere`
+This is the connectivity context the user is asking about - do not omit it.
+
 Answer (be concise and focus on the key information):"""
 
             qa_response = qa_llm.invoke(synthesis_prompt)
