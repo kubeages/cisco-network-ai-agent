@@ -1635,6 +1635,26 @@ async def query_intersight_with_llm(question: str, chat_history: str = "") -> tu
                     except Exception as e:
                         print(f"⚠️ Error looking up server MOID: {e}")
 
+            # If the current question has no quoted entity (follow-ups like "what about this
+            # server's adapters?") look back through chat_history for a recently-mentioned
+            # IntersightServer name. This keeps multi-turn conversations grounded.
+            if not server_moid and chat_history:
+                try:
+                    history_entities = re.findall(r"['\"]([^'\"]+)['\"]", chat_history)
+                    # Walk in reverse so the most recent mention wins
+                    for entity_name in reversed(history_entities):
+                        result = graph.query(
+                            "MATCH (s:IntersightServer {name: $name}) RETURN s.moid AS moid, s.name AS name LIMIT 1",
+                            params={"name": entity_name}
+                        )
+                        if result and len(result) > 0:
+                            server_moid = result[0].get('moid')
+                            server_name = result[0].get('name')
+                            print(f"🔍 Resolved 'this server' from chat history -> '{server_name}' ({server_moid})")
+                            break
+                except Exception as e:
+                    print(f"⚠️ Error looking up server MOID from chat history: {e}")
+
             # Step B: Tool selection
             # Alarm queries (prioritize before generic health)
             if "alarm" in question_lower:
@@ -1663,7 +1683,16 @@ async def query_intersight_with_llm(question: str, chat_history: str = "") -> tu
             # Server/compute keywords
             elif "server" in question_lower or "ucs" in question_lower or "compute" in question_lower or "blade" in question_lower or "rack" in question_lower:
                 candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["server", "compute", "blade", "rack"]) and "profile" not in t.lower()]
-            # Network adapter/vNIC keywords (for correlation)
+            # Network adapter / vNIC / connectivity questions for a SPECIFIC known server:
+            # The vnic/adapter MCP tools are all GET-by-MOID and broken (return 404
+            # 'undefined'), and list_vnics needs a lanConnectivityPolicyMoid we don't have.
+            # Route through list_compute_servers - the PhysicalSummary record includes
+            # MgmtIpAddress, KvmIpAddress, etc. We additionally enrich the answer below
+            # with Endpoint nodes already correlated to this server in Neo4j (real MACs +
+            # ACI-learned IPs).
+            elif server_moid and ("mac" in question_lower or "vnic" in question_lower or "adapter" in question_lower or "connectivity" in question_lower or "network" in question_lower):
+                candidate_tools = [t for t in tools if "list" in t.lower() and "server" in t.lower() and "profile" not in t.lower()]
+            # Network adapter/vNIC keywords (no specific server - fleet-wide)
             elif "mac" in question_lower or "vnic" in question_lower or "adapter" in question_lower:
                 candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["vnic", "adapter", "mac", "ethernet"])]
             # Policy keywords
@@ -1791,12 +1820,48 @@ Selected tool:"""
                 except Exception as e:
                     print(f"⚠️ Post-filter failed (continuing with raw result): {e}")
 
-            # Track data source
+            # Enrich with Neo4j-correlated endpoints for adapter/connectivity questions about
+            # a known server. The MCP doesn't expose a per-server host-eth-interface tool, but
+            # the ingestor already correlates server vNICs to ACI Endpoints by MAC. Pull that
+            # data so the LLM can answer "what adapters does this server have" properly.
+            if server_moid and ("mac" in question_lower or "vnic" in question_lower or "adapter" in question_lower or "connectivity" in question_lower or "network" in question_lower):
+                try:
+                    endpoint_rows = graph.query(
+                        """
+                        MATCH (s:IntersightServer {moid: $moid})-[r:CONNECTED_TO]->(e:Endpoint)
+                        OPTIONAL MATCH (e)-[:BELONGS_TO]->(epg:EPG)
+                        RETURN e.mac AS mac, e.ip AS ip,
+                               r.interface_name AS interface,
+                               epg.name AS epg
+                        ORDER BY r.interface_name
+                        """,
+                        params={"moid": server_moid}
+                    )
+                    if endpoint_rows:
+                        print(f"🔗 Enriching with {len(endpoint_rows)} correlated endpoint(s) from Neo4j")
+                        if isinstance(result, dict):
+                            result["correlatedEndpointsFromAci"] = endpoint_rows
+                        _aci_endpoint_count = len(endpoint_rows)
+                    else:
+                        _aci_endpoint_count = 0
+                except Exception as e:
+                    print(f"⚠️ Endpoint enrichment failed: {e}")
+                    _aci_endpoint_count = 0
+            else:
+                _aci_endpoint_count = 0
+
+            # Track data source(s)
             sources = [DataSource(
                 type="intersight",
                 description=f"Cisco Intersight compute data from {selected_tool}",
                 details={"tool": selected_tool, "account": "CAI-NL"}
             )]
+            if _aci_endpoint_count > 0:
+                sources.append(DataSource(
+                    type="neo4j",
+                    description=f"Correlated ACI endpoints ({_aci_endpoint_count}) from knowledge graph",
+                    details={"server": server_name or server_moid}
+                ))
 
             # Truncate result to fit token budget
             MAX_INTERSIGHT_TOKENS = 4000
