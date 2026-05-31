@@ -1174,6 +1174,12 @@ def classify_query_intent(question: str) -> str:
         except Exception as e:
             print(f"⚠️ Error checking entity type: {e}")
 
+    # Check for Fabric Interconnect pattern in quoted entities (e.g., "TS-FI-1-1")
+    if INTERSIGHT_MCP_ENABLED and quoted_entities:
+        if any(re.search(r'\bfi\b|-fi-', e.lower()) for e in quoted_entities):
+            print(f"🖥️  Intersight query detected (Fabric Interconnect pattern in entity)")
+            return "intersight"
+
     # Keywords indicating Intersight/compute queries
     intersight_keywords = [
         "server", "ucs", "compute", "blade", "rack unit", "chassis",
@@ -1562,27 +1568,25 @@ async def query_intersight_with_llm(question: str, chat_history: str = "") -> tu
             question_lower = question.lower()
             candidate_tools = []
 
+            # Pre-extract quoted entities to detect FI pattern (e.g., "TS-FI-1-1")
+            import re as _re_early
+            _quoted_for_detection = _re_early.findall(r"['\"]([^'\"]+)['\"]", question)
+            _has_fi_entity = any(_re_early.search(r'\bfi\b|-fi-', e.lower()) for e in _quoted_for_detection)
+
             # Alarm queries (prioritize before generic health)
             if "alarm" in question_lower:
                 candidate_tools = [t for t in tools if "alarm" in t.lower()]
+            # Fabric Interconnect queries (check before generic server check)
+            elif _has_fi_entity or "fabric interconnect" in question_lower or "fabric-interconnect" in question_lower:
+                candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["fabric_interconnect", "network_element"])]
+                if not candidate_tools:
+                    candidate_tools = [t for t in tools if "fabric" in t.lower() and "interconnect" in t.lower()]
             # Health/telemetry queries (server health, metrics)
             elif "health" in question_lower or "telemetry" in question_lower or "cpu" in question_lower or "memory" in question_lower or "temperature" in question_lower:
                 candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["health", "telemetry", "statistics"])]
-            # Server/compute keywords - if we have a specific server MOID, prefer get/query tools
+            # Server/compute keywords (server_moid is set later, only check keyword presence here)
             elif "server" in question_lower or "ucs" in question_lower or "compute" in question_lower or "blade" in question_lower or "rack" in question_lower:
-                if server_moid:
-                    # Prefer tools that can query a specific server
-                    candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["get_server", "get_compute", "server_detail"])]
-                    if not candidate_tools:
-                        # Fallback to list tools that can be filtered (exclude profile tools for physical servers)
-                        candidate_tools = [t for t in tools if
-                                         any(kw in t.lower() for kw in ["list_compute_servers", "list_compute_physical", "list_rack", "list_blade"])
-                                         and "profile" not in t.lower()]
-                        if not candidate_tools:
-                            # Last resort: any compute tool except profiles
-                            candidate_tools = [t for t in tools if "compute" in t.lower() and "profile" not in t.lower()]
-                else:
-                    candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["server", "compute", "blade", "rack"])]
+                candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["server", "compute", "blade", "rack"]) and "profile" not in t.lower()]
             # Network adapter/vNIC keywords (for correlation)
             elif "mac" in question_lower or "vnic" in question_lower or "adapter" in question_lower:
                 candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["vnic", "adapter", "mac", "ethernet"])]
@@ -1591,7 +1595,7 @@ async def query_intersight_with_llm(question: str, chat_history: str = "") -> tu
                 candidate_tools = [t for t in tools if "policy" in t.lower()]
             else:
                 # Default: list servers
-                candidate_tools = [t for t in tools if "list" in t.lower() and "server" in t.lower()]
+                candidate_tools = [t for t in tools if "list" in t.lower() and "server" in t.lower() and "profile" not in t.lower()]
 
             if not candidate_tools:
                 candidate_tools = tools[:5]  # Fallback to first 5 tools
@@ -1660,6 +1664,14 @@ Selected tool:"""
                 elif "list" in selected_tool.lower() and server_name:
                     tool_arguments["filter"] = f"Name eq '{server_name}'"
                     print(f"📋 Filtering by server name: {server_name}")
+
+            # For fabric_interconnect/network_element tools, filter by name from quoted entity
+            if "fabric_interconnect" in selected_tool.lower() or "network_element" in selected_tool.lower():
+                for entity_name in quoted_entities:
+                    if _re_early.search(r'\bfi\b|-fi-', entity_name.lower()):
+                        tool_arguments["filter"] = f"Name eq '{entity_name}'"
+                        print(f"📋 Filtering fabric interconnect by name: {entity_name}")
+                        break
 
             # For list_alarms, add severity filter if mentioned
             if selected_tool == "list_alarms":
