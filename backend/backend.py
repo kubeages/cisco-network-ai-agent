@@ -2485,31 +2485,48 @@ def get_suggestions(request: SuggestionRequest):
         )
 
         if is_anomaly_instance:
-            # Extract context from the answer (affected resource names like vPC, leaf, fabric)
-            # so the suggestion LLM can suggest follow-ups about those specific resources
+            # Generate follow-ups that drill into the AFFECTED RESOURCE.
+            # Hard constraints: the knowledge graph only models these node types -
+            #   Fabric, Tenant, AppProfile, EPG, VRF, BridgeDomain, Subnet, Node
+            #   (spine/leaf switches), Anomaly, Fault, Advisory, HealthSummary,
+            #   IntersightServer, Endpoint.
+            # It does NOT model vPCs, port-channels, interfaces, or VLANs as nodes -
+            # those names appear only as strings inside Anomaly.details. So suggestions
+            # MUST be queries that the graph can answer (about nodes/fabrics/tenants/etc.),
+            # not "tenants of vPC X" (no such relationship).
             anomaly_instance_prompt = PromptTemplate.from_template(
-                """The user just inspected ONE specific anomaly or fault instance on a Cisco ACI
-topology graph. The answer describes the affected resource (e.g. a specific vPC name,
-leaf switch, interface, tenant, or fabric).
+                """The user clicked one specific anomaly/fault on a Cisco ACI topology graph.
+Generate three concrete follow-up queries that DRILL INTO THE AFFECTED RESOURCE.
 
-Generate three follow-up queries that DRILL INTO THE AFFECTED RESOURCE, not the
-anomaly/fault name. Good follow-ups for Cisco ACI:
-- "Are there other anomalies on leaf-101 or leaf-102?"
-- "What other vPCs are configured on these leaves?"
-- "Which EPGs or endpoints use the affected vPC 'netbox-vpc'?"
-- "Show me the recent faults on the affected leaf switches"
-- "What is the health of the fabric 'ams-aci'?"
-- "Which tenants are impacted by this issue?"
+THE KNOWLEDGE GRAPH ONLY HAS THESE NODE TYPES (no others exist):
+  Fabric, Tenant, AppProfile, EPG, VRF, BridgeDomain, Subnet, Node (spine/leaf),
+  Anomaly, Fault, Advisory, HealthSummary, IntersightServer, Endpoint.
+vPCs, port-channels, interfaces, and VLANs are NOT nodes - they only appear as
+strings inside Anomaly.details. Do NOT generate queries about "tenants of vPC X" or
+"what EPGs use vPC X" - those relationships don't exist in the graph.
 
-AVOID suggestions that just re-query the same anomaly name (e.g. "What is the status of
-VPC_DOWN in fabric ams-aci" - the user already has the answer for this specific instance).
-AVOID generic "list all fabrics" style.
-Mention specific resource names from the answer.
+HARD RULES:
+1. Use ONLY names that literally appear in the Answer text below. Do NOT invent fault
+   codes, fabric names, or node names. If the answer says "leaf-101", you may use
+   "leaf-101"; do not write "leaf-103".
+2. Only generate queries the graph schema can answer. Good shapes:
+   - "Show all anomalies on Node '<leaf name>' in fabric '<fabric name>'"
+   - "List all faults on Node '<leaf name>'"
+   - "What other anomalies exist in fabric '<fabric name>'?"
+   - "Show the health summary for fabric '<fabric name>'"
+   - "What tenants are affected by anomalies in fabric '<fabric name>'?"
+   - "What is the role and status of Node '<leaf name>'?"
+3. NEVER suggest "List all fabrics", "Show all anomalies", or any unscoped fleet-wide
+   query - those are the initial suggestions, not useful drill-downs.
+4. NEVER re-query the same anomaly name (e.g. "status of VPC_DOWN") - the user just
+   read that answer.
+5. Each suggestion must reference at least one specific name from the Answer.
 
 Question: {question}
 Answer: {answer}
 
-Return only three queries, one per line, without numbers or bullets.
+Return exactly three queries, one per line, no numbers, no bullets, no quotes around
+the entire line.
 Follow-up queries:"""
             )
             suggestion_chain = anomaly_instance_prompt | suggestion_llm
