@@ -1061,13 +1061,14 @@ def validate_query_feasibility(question: str, capabilities: dict) -> tuple[bool,
     return True, ""
 
 
-def check_mcp_health(mcp_url: str, mcp_name: str) -> dict:
+def check_mcp_health(mcp_url: str, mcp_name: str, health_endpoint: str = "/health") -> dict:
     """
     Check if an MCP server is healthy and responsive.
 
     Args:
         mcp_url: Base URL of the MCP server
         mcp_name: Name of the MCP service (for logging)
+        health_endpoint: Health check endpoint path (default: /health)
 
     Returns:
         dict with 'available' (bool) and 'error' (str or None)
@@ -1075,7 +1076,7 @@ def check_mcp_health(mcp_url: str, mcp_name: str) -> dict:
     try:
         import httpx
         with httpx.Client(timeout=2.0, verify=False) as client:
-            response = client.get(f"{mcp_url}/health")
+            response = client.get(f"{mcp_url}{health_endpoint}")
             if response.status_code == 200:
                 return {'available': True, 'error': None}
             else:
@@ -1104,8 +1105,8 @@ def get_data_source_capabilities():
         sources = {row['source']: row.get('provides', '') for row in result}
 
         # Check MCP server health
-        nd_mcp_status = check_mcp_health(MCP_SERVER_URL, "ND MCP") if MCP_ENABLED and MCP_SERVER_URL else {'available': False, 'error': 'Disabled'}
-        intersight_mcp_status = check_mcp_health(INTERSIGHT_MCP_URL, "Intersight MCP") if INTERSIGHT_MCP_ENABLED else {'available': False, 'error': 'Disabled'}
+        nd_mcp_status = check_mcp_health(MCP_SERVER_URL, "ND MCP", "/api/health") if MCP_ENABLED and MCP_SERVER_URL else {'available': False, 'error': 'Disabled'}
+        intersight_mcp_status = check_mcp_health(INTERSIGHT_MCP_URL, "Intersight MCP", "/health") if INTERSIGHT_MCP_ENABLED else {'available': False, 'error': 'Disabled'}
 
         capabilities = {
             'apic_available': 'apic' in sources,
