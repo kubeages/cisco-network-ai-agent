@@ -1600,14 +1600,12 @@ async def query_intersight_with_llm(question: str, chat_history: str = "") -> tu
                 candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["fabric_interconnect", "network_element"])]
                 if not candidate_tools:
                     candidate_tools = [t for t in tools if "fabric" in t.lower() and "interconnect" in t.lower()]
-            # If we have a specific server MOID and the question is generic ("tell me about X"),
-            # prefer get_server_details over list_compute_servers. The MCP list filter is unreliable
-            # (returns all 33 servers regardless of Name filter), so MOID-based lookup is required
-            # to get the actual requested server back.
-            elif server_moid and "get_server_details" in tools and not any(
-                kw in question_lower for kw in ["telemetry", "cpu", "memory", "temperature", "mac", "vnic", "adapter", "policy", "bios", "boot"]
-            ):
-                candidate_tools = ["get_server_details"]
+            # NOTE: get_server_details, get_server_profile, and get_server_telemetry are
+            # broken in the Intersight MCP server (1.0.16) - they receive `undefined` for the
+            # MOID regardless of how it's passed and return HTTP 404. Until upstream is fixed,
+            # we route everything through list_compute_servers and post-filter the response
+            # in Python (see "Post-filter" block below). The MCP also ignores the OData filter
+            # parameter so server-side filtering doesn't help either.
             # Health/telemetry queries (server health, metrics)
             elif "health" in question_lower or "telemetry" in question_lower or "cpu" in question_lower or "memory" in question_lower or "temperature" in question_lower:
                 candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["health", "telemetry", "statistics"])]
