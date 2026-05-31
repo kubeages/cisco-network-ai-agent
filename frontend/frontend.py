@@ -2221,7 +2221,7 @@ function() {
             return;
         }
 
-        fetch('/api/capabilities', {
+        fetch('/run/capabilities', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ data: [] })
