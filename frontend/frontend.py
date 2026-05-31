@@ -1870,11 +1870,8 @@ footer {
 """
 
 # JavaScript to handle messages from iframe
-js_code = f"""
+js_code = """
 <script>
-// Backend API URL for MCP status checks
-window.BACKEND_API_URL = '{BACKEND_CAPABILITIES_URL}';
-
 window.addEventListener('message', function(event) {
     if (event.data && event.data.type === 'nodeClick') {
         console.log('Node click received:', event.data);
@@ -1923,6 +1920,13 @@ window.addEventListener('message', function(event) {
         }
     }
 });
+</script>
+"""
+
+# Inject backend API URL as a global variable
+backend_url_script = f"""
+<script>
+window.BACKEND_API_URL = '{BACKEND_CAPABILITIES_URL}';
 </script>
 """
 
@@ -2280,7 +2284,7 @@ function() {
 """
 
 # --- Gradio Interface ---
-with gr.Blocks(theme=gr.themes.Base(), title="Network AI Agent", css=custom_css, head=js_code, js=drag_resize_js) as demo:
+with gr.Blocks(theme=gr.themes.Base(), title="Network AI Agent", css=custom_css, head=js_code + backend_url_script, js=drag_resize_js) as demo:
 
     # State for dynamic suggestions
     suggestions_state = gr.State(initial_suggestions)
