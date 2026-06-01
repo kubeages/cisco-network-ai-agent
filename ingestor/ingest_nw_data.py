@@ -1239,7 +1239,10 @@ def process_nexus_dashboard_data(driver, token, url):
                 fabric_name = fabric.get("fabricName")
                 if not fabric_name: continue
 
-                advisories_url = f"{url}/api/v1/advisories?fabricName={fabric_name}"
+                # ND advisory endpoint: matches the anomaly path shape
+                # (/api/v1/analyze/<thing>/details?fabricName=X). The older
+                # /api/v1/advisories path that this code used returns 404.
+                advisories_url = f"{url}/api/v1/analyze/advisories/details?fabricName={fabric_name}"
                 print(f"  - Fetching advisories for fabric: {fabric_name}")
                 try:
                     advisories_response = requests.get(advisories_url, headers=headers, verify=False)
@@ -1248,22 +1251,39 @@ def process_nexus_dashboard_data(driver, token, url):
                         print(f"    Found {len(advisories_data)} advisories")
 
                         for advisory in advisories_data:
+                            adv_id = advisory.get("advisoryId", advisory.get("id", ""))
+                            # ND uses `title` for the human-readable name, `advisoryString`
+                            # for the full description, and `advisoryObjects` / `nodeNames`
+                            # for affected scope. Older field names kept as fallbacks.
+                            name = (advisory.get("title")
+                                    or advisory.get("advisoryName")
+                                    or advisory.get("name", ""))
+                            description = (advisory.get("advisoryString")
+                                           or advisory.get("description", ""))
+                            affected_objects = advisory.get("advisoryObjects") or []
+                            node_names = advisory.get("nodeNames") or []
+                            affected_devices = (advisory.get("affectedDeviceCount")
+                                                if "affectedDeviceCount" in advisory
+                                                else max(len(affected_objects), len(node_names)))
+
                             db_session.run("""
                                 MERGE (a:Advisory {id: $adv_id})
                                 SET a.name = $name,
                                     a.type = $type,
                                     a.severity = $severity,
+                                    a.category = $category,
                                     a.description = $description,
                                     a.affectedDevices = $affected_devices,
                                     a.fabric = $fabric_name,
                                     a.lastSeen = $timestamp
                             """,
-                            adv_id=advisory.get("advisoryId", advisory.get("id", "")),
-                            name=advisory.get("advisoryName", advisory.get("name", "")),
+                            adv_id=adv_id,
+                            name=name,
                             type=advisory.get("advisoryType", advisory.get("type", "")),
                             severity=advisory.get("severity", ""),
-                            description=advisory.get("description", ""),
-                            affected_devices=advisory.get("affectedDeviceCount", 0),
+                            category=advisory.get("category", ""),
+                            description=description,
+                            affected_devices=affected_devices,
                             fabric_name=fabric_name,
                             timestamp=sync_start_time)
 
@@ -1272,7 +1292,7 @@ def process_nexus_dashboard_data(driver, token, url):
                                 MATCH (f:Fabric {name: $fabric_name})
                                 MATCH (a:Advisory {id: $adv_id})
                                 MERGE (f)-[:HAS_ADVISORY]->(a)
-                            """, fabric_name=fabric_name, adv_id=advisory.get("advisoryId", advisory.get("id", "")))
+                            """, fabric_name=fabric_name, adv_id=adv_id)
                     else:
                         print(f"    Advisories endpoint returned status {advisories_response.status_code}")
                 except Exception as e:
