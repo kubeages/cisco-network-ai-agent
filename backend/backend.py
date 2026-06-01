@@ -1833,16 +1833,29 @@ async def query_intersight_with_llm(question: str, chat_history: str = "") -> tu
             # critical alarms in the fleet. Instead, route to the inventory tool:
             # PhysicalSummary / FI summary records include a reliable AlarmSummary
             # (Critical / Warning / Info counts) for the entity in question.
-            if "alarm" in question_lower and (server_moid or _has_fi_entity):
-                if _has_fi_entity:
-                    candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["fabric_interconnect", "network_element"])]
+            #
+            # IMPORTANT precedence: prefer the server path when server_moid is set,
+            # even if the name LOOKS like an FI (e.g. TS-FI-1-8 is actually a blade
+            # in chassis FI-1 slot 8, not a fabric interconnect). The Neo4j lookup is
+            # ground truth - if the entity is in IntersightServer, treat it as a
+            # server. Only fall to the FI tool when we have an FI-pattern entity
+            # that's NOT a known server.
+            if "alarm" in question_lower and server_moid:
+                # Known server (blade or rack) - the PhysicalSummary AlarmSummary is what we want
+                candidate_tools = [t for t in tools if "list" in t.lower() and "server" in t.lower() and "profile" not in t.lower()]
+            elif "alarm" in question_lower and _has_fi_entity:
+                # FI-pattern entity not in Neo4j as a server - hit the FI tool
+                candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["fabric_interconnect", "network_element"])]
                 if not candidate_tools:
                     candidate_tools = [t for t in tools if "list" in t.lower() and "server" in t.lower() and "profile" not in t.lower()]
             # Fleet-wide alarm queries (no specific entity) - keep using list_alarms
             elif "alarm" in question_lower:
                 candidate_tools = [t for t in tools if "alarm" in t.lower()]
-            # Fabric Interconnect queries (check before generic server check)
-            elif _has_fi_entity or "fabric interconnect" in question_lower or "fabric-interconnect" in question_lower:
+            # Fabric Interconnect queries: only when the entity is NOT in Neo4j as
+            # IntersightServer. Names like TS-FI-1-8 collide - they're actually blades
+            # in an FI-managed chassis, not the FI itself. The compute path (with the
+            # blade's AlarmSummary) is the right answer in those cases.
+            elif (_has_fi_entity and not server_moid) or "fabric interconnect" in question_lower or "fabric-interconnect" in question_lower:
                 candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["fabric_interconnect", "network_element"])]
                 if not candidate_tools:
                     candidate_tools = [t for t in tools if "fabric" in t.lower() and "interconnect" in t.lower()]
