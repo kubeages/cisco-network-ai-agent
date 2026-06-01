@@ -1354,17 +1354,22 @@ def classify_query_intent(question: str) -> str:
     unquoted_candidates = [t for t in unquoted_candidates if "-" in t or len(t) >= 6]
     candidate_entities = list(quoted_entities) + [c for c in unquoted_candidates if c not in quoted_entities]
 
-    # Check if any candidate entity is an IntersightServer in Neo4j
+    # Check if any candidate entity is an Intersight node (server or FI) in Neo4j
     if INTERSIGHT_MCP_ENABLED and candidate_entities:
         try:
             for entity_name in candidate_entities:
                 result = graph.query(
-                    "MATCH (n:IntersightServer {name: $name}) RETURN labels(n) AS labels LIMIT 1",
+                    """
+                    MATCH (n) WHERE n.name = $name
+                      AND any(l IN labels(n) WHERE l IN ['IntersightServer','FabricInterconnect','Chassis'])
+                    RETURN labels(n)[0] AS label LIMIT 1
+                    """,
                     params={"name": entity_name}
                 )
                 if result:
+                    label = result[0].get('label', 'Intersight node')
                     src = "quoted" if entity_name in quoted_entities else "unquoted"
-                    print(f"🖥️  Intersight query detected ({src} entity '{entity_name}' is IntersightServer)")
+                    print(f"🖥️  Intersight query detected ({src} entity '{entity_name}' is {label})")
                     return "intersight"
         except Exception as e:
             print(f"⚠️ Error checking entity type: {e}")
@@ -1789,9 +1794,22 @@ async def query_intersight_with_llm(question: str, chat_history: str = "") -> tu
 
             server_moid = None
             server_name = None
+            fi_moid = None  # set when the entity is a FabricInterconnect, not a server
             if candidate_entities:
                 for entity_name in candidate_entities:
                     try:
+                        # First check FabricInterconnect - if the user references an FI by
+                        # name we want its FI MOID, not a coincidentally-matching server.
+                        fi_result = graph.query(
+                            "MATCH (f:FabricInterconnect {name: $name}) RETURN f.moid AS moid, f.name AS name LIMIT 1",
+                            params={"name": entity_name}
+                        )
+                        if fi_result and len(fi_result) > 0:
+                            fi_moid = fi_result[0].get('moid')
+                            server_name = fi_result[0].get('name')
+                            print(f"🔍 Found FabricInterconnect '{server_name}' with MOID: {fi_moid}")
+                            break
+
                         result = graph.query(
                             "MATCH (s:IntersightServer {name: $name}) RETURN s.moid AS moid, s.name AS name LIMIT 1",
                             params={"name": entity_name}
@@ -1840,7 +1858,12 @@ async def query_intersight_with_llm(question: str, chat_history: str = "") -> tu
             # ground truth - if the entity is in IntersightServer, treat it as a
             # server. Only fall to the FI tool when we have an FI-pattern entity
             # that's NOT a known server.
-            if "alarm" in question_lower and server_moid:
+            if "alarm" in question_lower and fi_moid:
+                # Known FabricInterconnect - use the FI tool and post-filter by its MOID
+                candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["fabric_interconnect", "network_element"])]
+                if not candidate_tools:
+                    candidate_tools = [t for t in tools if "list" in t.lower() and "server" in t.lower() and "profile" not in t.lower()]
+            elif "alarm" in question_lower and server_moid:
                 # Known server (blade or rack) - the PhysicalSummary AlarmSummary is what we want
                 candidate_tools = [t for t in tools if "list" in t.lower() and "server" in t.lower() and "profile" not in t.lower()]
             elif "alarm" in question_lower and _has_fi_entity:
@@ -1994,7 +2017,8 @@ Selected tool:"""
             # Post-filter: the Intersight MCP often ignores the OData `filter` parameter and
             # returns ALL records. When we know which server/MOID the user asked about, trim the
             # results list to matching entries so the LLM doesn't synthesize from the wrong row.
-            if "list" in selected_tool.lower() and (server_moid or server_name):
+            target_moid = fi_moid or server_moid
+            if "list" in selected_tool.lower() and (target_moid or server_name):
                 try:
                     # The MCP response shape is {success, tool, parameters, result: {Results: [...]}}
                     inner = result.get("result") if isinstance(result, dict) else None
@@ -2006,12 +2030,13 @@ Selected tool:"""
                             row_moid = row.get("Moid")
                             row_name = (row.get("Name") or "").lower()
                             row_affected = (row.get("AffectedMoid") or "") if isinstance(row.get("AffectedMoid"), str) else ""
-                            if server_moid and (row_moid == server_moid or row_affected == server_moid):
+                            if target_moid and (row_moid == target_moid or row_affected == target_moid):
                                 filtered.append(row)
                             elif target_name_lower and row_name == target_name_lower:
                                 filtered.append(row)
                         if filtered and len(filtered) != len(all_rows):
-                            print(f"🔎 Post-filtered {len(all_rows)} → {len(filtered)} result(s) matching server '{server_name or server_moid}'")
+                            label = "fabric interconnect" if fi_moid else "server"
+                            print(f"🔎 Post-filtered {len(all_rows)} → {len(filtered)} result(s) matching {label} '{server_name or target_moid}'")
                             inner["Results"] = filtered
                 except Exception as e:
                     print(f"⚠️ Post-filter failed (continuing with raw result): {e}")

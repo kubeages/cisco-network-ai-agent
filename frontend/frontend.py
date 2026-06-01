@@ -85,6 +85,8 @@ NODE_COLORS = {
     "Fault": "#fb923c",       # Orange
     "Advisory": "#fbbf24",    # Amber
     "IntersightServer": "#ff1493", # Deep pink (servers stand out!)
+    "FabricInterconnect": "#a855f7", # Vivid purple (FIs - parent of blades)
+    "Chassis": "#475569",     # Slate gray (the box that holds FIs + blades)
     "Endpoint": "#32cd32",    # Lime green (network endpoints)
     "Unknown": "#8b949e",     # Gray
 }
@@ -104,6 +106,8 @@ NODE_SHAPES = {
     "Fault": "triangleDown",
     "Advisory": "star",
     "IntersightServer": "box",  # Servers as boxes
+    "FabricInterconnect": "diamond",  # FIs - visually distinct aggregator
+    "Chassis": "square",  # Chassis as squares (parent containers)
     "Endpoint": "dot",  # Endpoints as dots
     "Unknown": "dot",
 }
@@ -130,6 +134,8 @@ NODE_QUERY_TEMPLATES = {
     "Node": "Show me details about the fabric node '{name}'. What is its role (spine/leaf), model, and current status? Are there any faults affecting it?",
     "Fault": "Tell me about this fault: '{name}'. What is its severity, cause, and which object is affected? How can I resolve it?",
     "Advisory": "Tell me about this advisory: '{name}'. What type is it (PSIRT, EOL, Field Notice)? How many devices are affected and what action should I take?",
+    "FabricInterconnect": "Tell me about the fabric interconnect '{name}'. What model is it, which chassis is it part of, and what is its current alarm summary (critical/warning counts)?",
+    "Chassis": "Tell me about the chassis '{name}'. Which fabric interconnects and blades are part of it?",
     "Unknown": "Tell me about '{name}'."
 }
 
@@ -234,7 +240,9 @@ def generate_graph_html():
             color = NODE_COLORS.get(node_type, NODE_COLORS["Unknown"])
 
         # Size based on node type
-        size = (14 if node_type == "IntersightServer" else   # Servers very visible
+        size = (16 if node_type == "FabricInterconnect" else  # FIs slightly bigger than blades
+                14 if node_type == "IntersightServer" else    # Servers very visible
+                13 if node_type == "Chassis" else             # Chassis is the parent box
                 12 if node_type == "Fabric" else
                 10 if node_type in ["Tenant", "Node"] else
                 8 if node_type == "Anomaly" else
@@ -489,6 +497,16 @@ def generate_graph_html():
                 <svg width="16" height="16" viewBox="0 0 16 16" class="legend-shape">
                     <rect x="2" y="3" width="12" height="10" rx="1" fill="#ff1493"/>
                 </svg>Server
+            </div>
+            <div class="legend-item" data-type="FabricInterconnect">
+                <svg width="16" height="16" viewBox="0 0 16 16" class="legend-shape">
+                    <polygon points="8,2 14,8 8,14 2,8" fill="#a855f7"/>
+                </svg>FI
+            </div>
+            <div class="legend-item" data-type="Chassis">
+                <svg width="16" height="16" viewBox="0 0 16 16" class="legend-shape">
+                    <rect x="3" y="3" width="10" height="10" fill="#475569"/>
+                </svg>Chassis
             </div>
             <div class="legend-item inactive" data-type="Orphans" id="orphans-toggle">
                 <svg width="16" height="16" viewBox="0 0 16 16" class="legend-shape">
