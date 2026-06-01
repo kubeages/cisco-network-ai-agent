@@ -1809,8 +1809,21 @@ async def query_intersight_with_llm(question: str, chat_history: str = "") -> tu
                     print(f"⚠️ Error looking up server MOID from chat history: {e}")
 
             # Step B: Tool selection
-            # Alarm queries (prioritize before generic health)
-            if "alarm" in question_lower:
+            # Alarm queries for a SPECIFIC entity we already know about:
+            # list_alarms in the deployed Intersight MCP returns rows with
+            # AffectedMoid, AffectedObject.Name, and AffectedMoidType all blanked
+            # out, so we cannot attribute any alarm to a specific server or FI.
+            # Trying anyway produces "no critical alarm" answers when there are 52
+            # critical alarms in the fleet. Instead, route to the inventory tool:
+            # PhysicalSummary / FI summary records include a reliable AlarmSummary
+            # (Critical / Warning / Info counts) for the entity in question.
+            if "alarm" in question_lower and (server_moid or _has_fi_entity):
+                if _has_fi_entity:
+                    candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["fabric_interconnect", "network_element"])]
+                if not candidate_tools:
+                    candidate_tools = [t for t in tools if "list" in t.lower() and "server" in t.lower() and "profile" not in t.lower()]
+            # Fleet-wide alarm queries (no specific entity) - keep using list_alarms
+            elif "alarm" in question_lower:
                 candidate_tools = [t for t in tools if "alarm" in t.lower()]
             # Fabric Interconnect queries (check before generic server check)
             elif _has_fi_entity or "fabric interconnect" in question_lower or "fabric-interconnect" in question_lower:
@@ -2070,12 +2083,13 @@ profile, and tenant. Format example:
     tenant `titansphere`
 This is the connectivity context the user is asking about - do not omit it.
 
-LIVE TELEMETRY ABSENCE - The tool used (`list_compute_servers`) returns the inventory
-record only: it includes CpuCapacity (max GHz available), NumCpuCores, NumThreads,
-TotalMemory (MB installed), AvailableMemory (MB free), OperPowerState, AlarmSummary
-(counts of critical/warning/info alarms). It does NOT include live CPU %, live memory
-usage %, temperature, fan RPM, or power draw - those come from a separate telemetry
-endpoint that is not currently reachable.
+LIVE TELEMETRY ABSENCE - The tool used (`list_compute_servers` or
+`list_fabric_interconnects`) returns the inventory record only: it includes
+CpuCapacity (max GHz available), NumCpuCores, NumThreads, TotalMemory (MB installed),
+AvailableMemory (MB free), OperPowerState, AlarmSummary (counts of
+critical/warning/info alarms). It does NOT include live CPU %, live memory usage %,
+temperature, fan RPM, or power draw - those come from a separate telemetry endpoint
+that is not currently reachable.
 When the user asks about LIVE or CURRENT CPU/memory usage, temperature, or power
 consumption, do NOT say "data is missing" as if it were a database gap. Instead:
   1. State explicitly that live performance telemetry isn't available through this
@@ -2084,6 +2098,18 @@ consumption, do NOT say "data is missing" as if it were a database gap. Instead:
      power state, alarm summary),
   3. Suggest checking the Intersight UI (intersight.com) for the real-time graph if
      they need live values.
+
+ALARM ATTRIBUTION LIMITATION - The `AlarmSummary` field on the inventory record is
+RELIABLE: if it says Critical=1, that entity has exactly 1 critical alarm. The
+fleet-wide `list_alarms` tool, however, returns alarm rows with AffectedMoid and
+AffectedObject.Name fields blanked out, so we cannot enumerate the per-alarm details
+(description, cause, severity, when raised) scoped to a specific server or FI.
+When the user asks "what is the critical alarm for X":
+  1. State the count from AlarmSummary (e.g. "X has 1 critical alarm and 0 warning").
+  2. Explain that per-alarm description text is not available through the Intersight
+     MCP at this time; the alarm details (description, cause, recommended action) can
+     be seen in the Intersight UI under the device's Alarms tab.
+  3. Do NOT respond "no critical alarm exists" when AlarmSummary.Critical > 0.
 
 Answer (be concise and focus on the key information):"""
 
