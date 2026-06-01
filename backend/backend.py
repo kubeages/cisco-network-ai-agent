@@ -1344,23 +1344,34 @@ def classify_query_intent(question: str) -> str:
     import re
     quoted_entities = re.findall(r"['\"]([^'\"]+)['\"]", question)
 
-    # Check if any quoted entity is an IntersightServer in Neo4j
-    if INTERSIGHT_MCP_ENABLED and quoted_entities:
+    # ALSO extract unquoted entity-like tokens. Server / FI names follow a recognisable
+    # shape: uppercase letters, digits, hyphens, often a vendor prefix like C225-, FI-,
+    # TS-FI-, FCH-. Users frequently drop the quotes ("What is the alarm for TS-FI-1-8?"),
+    # which previously made the router miss the Intersight signal entirely and fall
+    # through to a generic Neo4j answer.
+    unquoted_candidates = re.findall(r"\b[A-Z][A-Z0-9-]{2,}[0-9][A-Z0-9-]*\b", question)
+    # Filter out obvious non-entities (e.g. "API", "ND", "ACI", "URL")
+    unquoted_candidates = [t for t in unquoted_candidates if "-" in t or len(t) >= 6]
+    candidate_entities = list(quoted_entities) + [c for c in unquoted_candidates if c not in quoted_entities]
+
+    # Check if any candidate entity is an IntersightServer in Neo4j
+    if INTERSIGHT_MCP_ENABLED and candidate_entities:
         try:
-            for entity_name in quoted_entities:
+            for entity_name in candidate_entities:
                 result = graph.query(
                     "MATCH (n:IntersightServer {name: $name}) RETURN labels(n) AS labels LIMIT 1",
                     params={"name": entity_name}
                 )
                 if result:
-                    print(f"🖥️  Intersight query detected (entity '{entity_name}' is IntersightServer)")
+                    src = "quoted" if entity_name in quoted_entities else "unquoted"
+                    print(f"🖥️  Intersight query detected ({src} entity '{entity_name}' is IntersightServer)")
                     return "intersight"
         except Exception as e:
             print(f"⚠️ Error checking entity type: {e}")
 
-    # Check for Fabric Interconnect pattern in quoted entities (e.g., "TS-FI-1-1")
-    if INTERSIGHT_MCP_ENABLED and quoted_entities:
-        if any(re.search(r'\bfi\b|-fi-', e.lower()) for e in quoted_entities):
+    # Check for Fabric Interconnect pattern in any candidate entity (e.g. "TS-FI-1-1")
+    if INTERSIGHT_MCP_ENABLED and candidate_entities:
+        if any(re.search(r'\bfi\b|-fi-', e.lower()) for e in candidate_entities):
             print(f"🖥️  Intersight query detected (Fabric Interconnect pattern in entity)")
             return "intersight"
 
@@ -1765,16 +1776,21 @@ async def query_intersight_with_llm(question: str, chat_history: str = "") -> tu
             question_lower = question.lower()
             candidate_tools = []
 
-            # Step A: Extract quoted entities and look up MOIDs in Neo4j FIRST.
-            # We use this to pick a more precise tool (get_server_details, alarm filtering by MOID).
+            # Step A: Extract entity names and look up MOIDs in Neo4j FIRST.
+            # Accept both quoted ("'TS-FI-1-1'") and unquoted (TS-FI-1-8) entities -
+            # users often drop quotes on follow-up questions. Same extraction logic
+            # as in route_query.
             import re
             quoted_entities = re.findall(r"['\"]([^'\"]+)['\"]", question)
-            _has_fi_entity = any(re.search(r'\bfi\b|-fi-', e.lower()) for e in quoted_entities)
+            unquoted_candidates = re.findall(r"\b[A-Z][A-Z0-9-]{2,}[0-9][A-Z0-9-]*\b", question)
+            unquoted_candidates = [t for t in unquoted_candidates if "-" in t or len(t) >= 6]
+            candidate_entities = list(quoted_entities) + [c for c in unquoted_candidates if c not in quoted_entities]
+            _has_fi_entity = any(re.search(r'\bfi\b|-fi-', e.lower()) for e in candidate_entities)
 
             server_moid = None
             server_name = None
-            if quoted_entities:
-                for entity_name in quoted_entities:
+            if candidate_entities:
+                for entity_name in candidate_entities:
                     try:
                         result = graph.query(
                             "MATCH (s:IntersightServer {name: $name}) RETURN s.moid AS moid, s.name AS name LIMIT 1",
@@ -1923,9 +1939,10 @@ Selected tool:"""
                     tool_arguments["filter"] = f"Name eq '{server_name}'"
                     print(f"📋 Filtering by server name: {server_name}")
 
-            # For fabric_interconnect/network_element tools, filter by name from quoted entity
+            # For fabric_interconnect/network_element tools, filter by name from any
+            # candidate entity (quoted or unquoted)
             if "fabric_interconnect" in selected_tool.lower() or "network_element" in selected_tool.lower():
-                for entity_name in quoted_entities:
+                for entity_name in candidate_entities:
                     if re.search(r'\bfi\b|-fi-', entity_name.lower()):
                         tool_arguments["filter"] = f"Name eq '{entity_name}'"
                         print(f"📋 Filtering fabric interconnect by name: {entity_name}")
