@@ -367,6 +367,69 @@ if SPLUNK_ENABLED:
     FastAPIInstrumentor.instrument_app(app)
     print("✅ FastAPI instrumented for tracing")
 
+# --- Prometheus metrics for HPA ---
+# Tracks how many LLM-bound requests are in flight at any given time. This is the right
+# signal for autoscaling: CPU stays low while a pod is busy waiting on LLM/MCP, so a
+# CPU-based HPA misses real load. The custom-metric HPA in openshift/backend-hpa.yaml
+# scales on the average value of this gauge across pods.
+from prometheus_client import (
+    Gauge as _PromGauge,
+    Counter as _PromCounter,
+    Histogram as _PromHistogram,
+    generate_latest as _prom_generate,
+    CONTENT_TYPE_LATEST as _prom_content_type,
+)
+from starlette.requests import Request as _StarletteRequest
+from starlette.responses import Response as _StarletteResponse
+
+INFLIGHT = _PromGauge(
+    "gbaia_inflight_requests",
+    "Number of /ask or /ask/stream requests currently being processed by this pod",
+)
+REQUESTS_TOTAL = _PromCounter(
+    "gbaia_requests_total",
+    "Total requests handled by this pod, by endpoint and status",
+    ["endpoint", "status"],
+)
+REQUEST_DURATION = _PromHistogram(
+    "gbaia_request_duration_seconds",
+    "End-to-end request duration, by endpoint",
+    ["endpoint"],
+    buckets=(0.5, 1, 2, 5, 10, 15, 20, 30, 45, 60, 90, 120),
+)
+
+# Only track in-flight on the LLM-heavy paths - /api/health and /metrics polling
+# would dilute the signal that the HPA reacts to.
+_INFLIGHT_PATHS = ("/ask", "/ask/stream", "/suggestions")
+
+
+@app.middleware("http")
+async def _track_inflight(request: _StarletteRequest, call_next):
+    path = request.url.path
+    track = any(path.startswith(p) for p in _INFLIGHT_PATHS)
+    if track:
+        INFLIGHT.inc()
+    import time as _t
+    t0 = _t.time()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
+    finally:
+        REQUESTS_TOTAL.labels(endpoint=path, status=str(status_code)).inc()
+        REQUEST_DURATION.labels(endpoint=path).observe(_t.time() - t0)
+        if track:
+            INFLIGHT.dec()
+
+
+@app.get("/metrics")
+def metrics():
+    """Prometheus scrape endpoint. Returns the in-flight gauge plus request totals
+    and a latency histogram. Consumed by the Prometheus Adapter to drive the HPA on
+    backend-api (see openshift/backend-hpa.yaml)."""
+    return _StarletteResponse(_prom_generate(), media_type=_prom_content_type)
+
 print("▶️  Connecting to Neo4j knowledge graph...")
 graph = Neo4jGraph(url=NEO4J_URI, username=NEO4J_USER, password=NEO4J_PASSWORD)
 graph.refresh_schema()
