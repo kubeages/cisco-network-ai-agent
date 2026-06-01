@@ -452,7 +452,7 @@ def process_intersight_data(driver, mcp_url=None):
         from intersight.api_client import ApiClient
         from intersight.configuration import Configuration
         from intersight.signing import HttpSigningConfiguration
-        from intersight.api import compute_api, adapter_api, network_element_api, equipment_api
+        from intersight.api import compute_api, adapter_api, network_api, equipment_api
 
         # Configure API client
         config = Configuration()
@@ -949,7 +949,7 @@ def process_intersight_data(driver, mcp_url=None):
             counters["new_fis"] = 0
             counters["updated_fis"] = 0
             try:
-                network_instance = network_element_api.NetworkElementApi(api_client)
+                network_instance = network_api.NetworkApi(api_client)
                 fi_response = network_instance.get_network_element_summary_list()
                 fis = (fi_response.results if fi_response and hasattr(fi_response, 'results') else []) or []
                 print(f"    Found {len(fis)} fabric interconnects")
