@@ -5,7 +5,7 @@ A conversational AI agent for network operations that unifies data from **Cisco 
 Users interact through a Gradio web UI that combines a 3D topology graph (click any node to drill into it) with a chat panel. The agent routes each question to the right backend — Neo4j for topology and policy, the ND MCP server for live operational data, the Intersight MCP server for compute / server data — and synthesises a unified answer.
 
 <p align="center">
-  <img src="architecture.png" alt="Architecture Diagram" width="800"/>
+  <img src="architecture.png?v=2" alt="Architecture Diagram" width="800"/>
 </p>
 
 Special thanks to three great Cisconians who made this possible: **Rob van der Kind, Jara Osterfeld, Olaf Barning**.
