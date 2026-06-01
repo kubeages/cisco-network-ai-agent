@@ -1,21 +1,25 @@
-# Backend-api custom-metric HPA
+# Backend-api custom-metric autoscaling
 #
-# Scales backend-api based on the average number of in-flight LLM/MCP requests
-# per pod. The metric is exposed by backend.py at /metrics as `gbaia_inflight_requests`
-# (see the _track_inflight middleware and the /metrics endpoint).
+# This deployment uses Red Hat's Custom Metrics Autoscaler (KEDA) which is already
+# installed cluster-wide. KEDA queries the OpenShift thanos-querier with a service-
+# account token and exposes the result as an external metric; the HPA it creates
+# under the hood scales backend-api accordingly.
 #
-# Prerequisites in the cluster:
-#   1. Prometheus that scrapes /metrics on the backend-api pods. The ServiceMonitor
-#      below works if the OpenShift user-workload monitoring stack (or the Prometheus
-#      Operator) is enabled in the gbaia namespace.
-#   2. prometheus-adapter (or KEDA + the `prometheus` scaler) installed and configured
-#      to expose `gbaia_inflight_requests` through the custom.metrics.k8s.io API.
-#      See the ConfigMap snippet at the bottom.
+# The metric is gbaia_inflight_requests, exposed by backend.py at /metrics:
+#   - Incremented on /ask, /ask/stream, /suggestions
+#   - Excluded from /api/health and /metrics so the signal stays clean
+#
+# Pipeline:
+#   backend.py /metrics  →  user-workload Prometheus (via ServiceMonitor)
+#                       →  thanos-querier
+#                       →  KEDA Prometheus scaler
+#                       →  HPA on backend-api
 #
 # Apply:
 #   oc apply -f openshift/backend-hpa.yaml
 #
 ---
+# Headless service so user-workload Prometheus gets a per-pod scrape target
 apiVersion: v1
 kind: Service
 metadata:
@@ -32,8 +36,10 @@ spec:
       port: 8000
       targetPort: 8000
       protocol: TCP
-  clusterIP: None        # headless - we want per-pod scrape targets
+  clusterIP: None
 ---
+# User-workload Prometheus picks this up automatically when
+# enableUserWorkload: true (already configured in cluster-monitoring-config)
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
@@ -52,69 +58,88 @@ spec:
       interval: 15s
       scrapeTimeout: 10s
 ---
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
+# ServiceAccount that KEDA uses to query thanos-querier.
+# Needs cluster-monitoring-view to read user-workload metrics.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: thanos-query-sa
+  namespace: gbaia
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: gbaia-thanos-query-sa-view
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-monitoring-view
+subjects:
+  - kind: ServiceAccount
+    name: thanos-query-sa
+    namespace: gbaia
+---
+# A long-lived token for the SA. KEDA picks this up via TriggerAuthentication.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: thanos-query-sa-token
+  namespace: gbaia
+  annotations:
+    kubernetes.io/service-account.name: thanos-query-sa
+type: kubernetes.io/service-account-token
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: thanos-auth
+  namespace: gbaia
+spec:
+  secretTargetRef:
+    - parameter: bearerToken
+      name: thanos-query-sa-token
+      key: token
+    - parameter: ca
+      name: thanos-query-sa-token
+      key: ca.crt
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
 metadata:
   name: backend-api
   namespace: gbaia
 spec:
   scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
     name: backend-api
-  minReplicas: 2
-  maxReplicas: 8
-  metrics:
-    # Primary signal: in-flight LLM/MCP requests per pod.
-    # Target: 4 concurrent requests per pod. With p95 ~ 15-25 s per /ask, that
-    # gives each user a sub-30s response under expected load.
-    - type: Pods
-      pods:
-        metric:
-          name: gbaia_inflight_requests
-        target:
-          type: AverageValue
-          averageValue: "4"
-    # Backstop on memory in case of an LLM payload spike that doesn't show up
-    # immediately in the in-flight count (e.g. one very large synthesis).
-    - type: Resource
-      resource:
-        name: memory
-        target:
-          type: Utilization
-          averageUtilization: 80
-  behavior:
-    scaleUp:
-      stabilizationWindowSeconds: 30
-      policies:
-        - type: Pods
-          value: 2
-          periodSeconds: 30
-    scaleDown:
-      stabilizationWindowSeconds: 300       # avoid flapping after burst
-      policies:
-        - type: Pods
-          value: 1
-          periodSeconds: 60
----
-# Prometheus Adapter rule snippet
-# Drop this into the adapter's ConfigMap under `rules:` so the HPA can resolve
-# the custom metric via custom.metrics.k8s.io/v1beta1/.../pods/gbaia_inflight_requests.
-#
-# apiVersion: v1
-# kind: ConfigMap
-# metadata:
-#   name: adapter-config
-#   namespace: monitoring
-# data:
-#   config.yaml: |
-#     rules:
-#       - seriesQuery: 'gbaia_inflight_requests{namespace!="",pod!=""}'
-#         resources:
-#           overrides:
-#             namespace: {resource: "namespace"}
-#             pod:       {resource: "pod"}
-#         name:
-#           matches: "^gbaia_inflight_requests$"
-#           as: "gbaia_inflight_requests"
-#         metricsQuery: 'avg_over_time(gbaia_inflight_requests{<<.LabelMatchers>>}[1m])'
+  minReplicaCount: 2
+  maxReplicaCount: 8
+  pollingInterval: 15      # query Prometheus every 15s
+  cooldownPeriod: 300      # wait 5 min of idle before scaling down
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 30
+          policies:
+            - type: Pods
+              value: 2
+              periodSeconds: 30
+        scaleDown:
+          stabilizationWindowSeconds: 300
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 60
+  triggers:
+    # Primary: in-flight LLM/MCP requests per pod
+    - type: prometheus
+      metricType: AverageValue
+      metadata:
+        serverAddress: https://thanos-querier.openshift-monitoring.svc.cluster.local:9092
+        # avg(...) gives us a single number; KEDA divides by replica count to drive AverageValue
+        query: sum(gbaia_inflight_requests{namespace="gbaia"})
+        threshold: "4"
+        authModes: bearer
+        unsafeSsl: "true"
+      authenticationRef:
+        name: thanos-auth
