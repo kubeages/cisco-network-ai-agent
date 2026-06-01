@@ -135,7 +135,7 @@ spec:
     - type: prometheus
       metricType: AverageValue
       metadata:
-        serverAddress: https://thanos-querier.openshift-monitoring.svc.cluster.local:9092
+        serverAddress: https://thanos-querier.openshift-monitoring.svc.cluster.local:9091
         # avg(...) gives us a single number; KEDA divides by replica count to drive AverageValue
         query: sum(gbaia_inflight_requests{namespace="gbaia"})
         threshold: "4"
