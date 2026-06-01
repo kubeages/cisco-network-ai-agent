@@ -938,12 +938,65 @@ def process_intersight_data(driver, mcp_url=None):
             if deleted > 0:
                 print(f"  🗑️  Removed {deleted} stale servers")
 
+            # ----- Chassis ingestion -----
+            # equipment.Chassis records carry the human-readable Name (e.g. "TS-FI-1"),
+            # Model, Serial and the RegisteredDevice.Moid that ties the chassis to its
+            # UCS domain (and therefore to the FIs that serve it). The NetworkElements
+            # field on the chassis is sometimes empty, so we use RegisteredDevice.Moid
+            # as the join key between Chassis and FabricInterconnect below.
+            print(f"\n  📡 Querying chassis (equipment.Chassis)...")
+            counters["chassis"] = 0
+            counters["new_chassis"] = 0
+            counters["updated_chassis"] = 0
+            try:
+                equipment_instance = equipment_api.EquipmentApi(api_client)
+                chassis_response = equipment_instance.get_equipment_chassis_list()
+                chs = (chassis_response.results if chassis_response and hasattr(chassis_response, 'results') else []) or []
+                print(f"    Found {len(chs)} chassis")
+                for c in chs:
+                    c_moid = getattr(c, 'moid', None)
+                    if not c_moid:
+                        continue
+                    c_name = getattr(c, 'name', '') or getattr(c, 'dn', '') or f"chassis-{c_moid[:8]}"
+                    c_model = getattr(c, 'model', '') or ''
+                    c_serial = getattr(c, 'serial', '') or ''
+                    c_vendor = getattr(c, 'vendor', '') or ''
+                    c_rd = getattr(c, 'registered_device', None)
+                    c_rd_moid = getattr(c_rd, 'moid', None) if c_rd else None
+
+                    res = traced_neo4j_run(
+                        db_session,
+                        """
+                        MERGE (c:Chassis {moid: $moid})
+                        ON CREATE SET
+                            c.name = $name, c.model = $model, c.serial = $serial,
+                            c.vendor = $vendor, c.registered_device_moid = $rd_moid,
+                            c.first_seen = $timestamp, c.last_seen = $timestamp
+                        ON MATCH SET
+                            c.name = $name, c.model = $model, c.serial = $serial,
+                            c.vendor = $vendor, c.registered_device_moid = $rd_moid,
+                            c.last_seen = $timestamp
+                        RETURN CASE WHEN c.first_seen = $timestamp THEN true ELSE false END AS is_new
+                        """,
+                        "neo4j.create_chassis",
+                        moid=c_moid, name=c_name, model=c_model, serial=c_serial,
+                        vendor=c_vendor, rd_moid=c_rd_moid,
+                        timestamp=sync_start_time
+                    )
+                    rec = res.single()
+                    counters["chassis"] += 1
+                    if rec and rec["is_new"]:
+                        counters["new_chassis"] += 1
+                    else:
+                        counters["updated_chassis"] += 1
+            except Exception as ce:
+                print(f"  ⚠️  Could not ingest chassis: {ce}")
+
             # ----- Fabric Interconnect ingestion -----
-            # FIs are network_element.Summary records, separate from compute.PhysicalSummary.
-            # The MCP tool list_fabric_interconnects returns these with Name=null, so we
-            # synthesise a friendly name from the Dn (e.g. switch-FDO26152018) and the
-            # SwitchId (A/B). Linking each FI to its chassis lets the 3D map cluster the
-            # blade(s) and FIs that share a chassis.
+            # FIs are network_element.Summary records. Name on these records is null in
+            # this Intersight version, so synthesise a clean name from Serial + SwitchId
+            # (e.g. FI-FDO26152018-A). Track RegisteredDevice.Moid so we can match each
+            # FI to its chassis at the end (chassis sharing RegisteredDevice.Moid).
             print(f"\n  📡 Querying fabric interconnects (network_element.Summary)...")
             counters["fis"] = 0
             counters["new_fis"] = 0
@@ -968,9 +1021,16 @@ def process_intersight_data(driver, mcp_url=None):
                                or '')
                     firmware = getattr(fi, 'ucsm_running_firmware', '') or getattr(fi, 'version', '') or ''
 
-                    # Friendly name: prefer Dn (e.g. switch-FDO26152018), append side
-                    base = dn or (f"switch-{serial}" if serial else f"fi-{fi_moid[:8]}")
-                    fi_name = f"{base}-{switch_id}" if switch_id else base
+                    # Clean friendly name: FI-<Serial>-<SwitchId>. Falls back through Dn,
+                    # then a moid-truncated placeholder, so we never emit ugly "sys/switch-A-A".
+                    if serial and switch_id:
+                        fi_name = f"FI-{serial}-{switch_id}"
+                    elif serial:
+                        fi_name = f"FI-{serial}"
+                    elif dn:
+                        fi_name = f"{dn}-{switch_id}" if switch_id else dn
+                    else:
+                        fi_name = f"FI-{fi_moid[:8]}"
 
                     # AlarmSummary
                     asum = getattr(fi, 'alarm_summary', None)
@@ -979,12 +1039,9 @@ def process_intersight_data(driver, mcp_url=None):
                     info = getattr(asum, 'info', 0) if asum else 0
                     health = "Critical" if critical else ("Warning" if warning else "Healthy")
 
-                    # Chassis ancestor
-                    fi_chassis_moid = None
-                    for anc in (getattr(fi, 'ancestors', None) or []):
-                        if getattr(anc, 'object_type', '') == 'equipment.Chassis':
-                            fi_chassis_moid = getattr(anc, 'moid', None)
-                            break
+                    # RegisteredDevice MOID - links the FI to its chassis (same UCS domain)
+                    rd = getattr(fi, 'registered_device', None)
+                    rd_moid = getattr(rd, 'moid', None) if rd else None
 
                     res = traced_neo4j_run(
                         db_session,
@@ -996,7 +1053,7 @@ def process_intersight_data(driver, mcp_url=None):
                             f.mgmt_ip = $mgmt_ip, f.firmware = $firmware,
                             f.health = $health,
                             f.critical_alarms = $critical, f.warning_alarms = $warning, f.info_alarms = $info,
-                            f.chassis_moid = $chassis_moid,
+                            f.registered_device_moid = $rd_moid,
                             f.first_seen = $timestamp, f.last_seen = $timestamp
                         ON MATCH SET
                             f.name = $name, f.dn = $dn, f.model = $model,
@@ -1004,7 +1061,7 @@ def process_intersight_data(driver, mcp_url=None):
                             f.mgmt_ip = $mgmt_ip, f.firmware = $firmware,
                             f.health = $health,
                             f.critical_alarms = $critical, f.warning_alarms = $warning, f.info_alarms = $info,
-                            f.chassis_moid = $chassis_moid,
+                            f.registered_device_moid = $rd_moid,
                             f.last_seen = $timestamp
                         RETURN CASE WHEN f.first_seen = $timestamp THEN true ELSE false END AS is_new
                         """,
@@ -1013,7 +1070,7 @@ def process_intersight_data(driver, mcp_url=None):
                         serial=serial, switch_id=switch_id, mgmt_ip=mgmt_ip,
                         firmware=firmware, health=health,
                         critical=critical, warning=warning, info=info,
-                        chassis_moid=fi_chassis_moid,
+                        rd_moid=rd_moid,
                         timestamp=sync_start_time
                     )
                     rec = res.single()
@@ -1023,25 +1080,25 @@ def process_intersight_data(driver, mcp_url=None):
                     else:
                         counters["updated_fis"] += 1
 
-                    # Link FI to its chassis (MERGE the chassis too if blades didn't)
-                    if fi_chassis_moid:
-                        traced_neo4j_run(
-                            db_session,
-                            """
-                            MERGE (c:Chassis {moid: $chassis_moid})
-                              ON CREATE SET c.first_seen = $timestamp, c.last_seen = $timestamp
-                              ON MATCH  SET c.last_seen = $timestamp
-                            WITH c
-                            MATCH (f:FabricInterconnect {moid: $fi_moid})
-                            MERGE (f)-[r:PART_OF]->(c)
-                              ON CREATE SET r.created = $timestamp
-                              SET r.last_seen = $timestamp
-                            """,
-                            "neo4j.link_fi_to_chassis",
-                            chassis_moid=fi_chassis_moid,
-                            fi_moid=fi_moid,
-                            timestamp=sync_start_time
-                        )
+                # Link FIs to chassis they share a RegisteredDevice with - the join key
+                # that actually exists for UCSM domains in this environment.
+                link_result = traced_neo4j_run(
+                    db_session,
+                    """
+                    MATCH (f:FabricInterconnect)
+                    WHERE f.registered_device_moid IS NOT NULL
+                    MATCH (c:Chassis {registered_device_moid: f.registered_device_moid})
+                    MERGE (f)-[r:PART_OF]->(c)
+                      ON CREATE SET r.created = $timestamp
+                      SET r.last_seen = $timestamp
+                    RETURN count(r) AS linked
+                    """,
+                    "neo4j.link_fis_to_chassis_by_rd",
+                    timestamp=sync_start_time
+                )
+                linked = link_result.single()["linked"]
+                if linked:
+                    print(f"  🔗 Linked {linked} FI→Chassis relationship(s) via RegisteredDevice")
 
                 # Clean up stale FIs
                 stale_fi = traced_neo4j_run(
@@ -1058,12 +1115,29 @@ def process_intersight_data(driver, mcp_url=None):
                 deleted_fi = stale_fi.single()["deleted_count"]
                 if deleted_fi > 0:
                     print(f"  🗑️  Removed {deleted_fi} stale fabric interconnects")
+
+                # Clean up stale chassis
+                stale_c = traced_neo4j_run(
+                    db_session,
+                    """
+                    MATCH (c:Chassis)
+                    WHERE c.last_seen < $sync_start_time
+                    DETACH DELETE c
+                    RETURN count(c) AS deleted_count
+                    """,
+                    "neo4j.cleanup_stale_chassis",
+                    sync_start_time=sync_start_time
+                )
+                deleted_c = stale_c.single()["deleted_count"]
+                if deleted_c > 0:
+                    print(f"  🗑️  Removed {deleted_c} stale chassis")
             except Exception as fi_err:
                 print(f"  ⚠️  Could not ingest fabric interconnects: {fi_err}")
 
         # Print summary
         print(f"\n  📊 Intersight Ingestion Summary:")
         print(f"     - Servers processed: {counters['servers']} ({counters['new_servers']} new, {counters['updated_servers']} updated)")
+        print(f"     - Chassis processed: {counters.get('chassis', 0)} ({counters.get('new_chassis', 0)} new, {counters.get('updated_chassis', 0)} updated)")
         print(f"     - Fabric interconnects processed: {counters.get('fis', 0)} ({counters.get('new_fis', 0)} new, {counters.get('updated_fis', 0)} updated)")
         print(f"     - vNICs found: {counters['vnics']}")
         print(f"     - MAC correlations created: {counters['mac_correlations']}")
