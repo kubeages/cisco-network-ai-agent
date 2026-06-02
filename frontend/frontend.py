@@ -125,7 +125,7 @@ NODE_QUERY_TEMPLATES = {
     "Tenant": "Tell me about the tenant '{name}'. What application profiles, EPGs, VRFs, and Bridge Domains does it have? Are there any anomalies affecting it?",
     "AppProfile": "What EPGs belong to the application profile '{name}'{tenant_context}? Show me its structure and any issues.",
     "EPG": "Describe the EPG '{name}'{tenant_context}. What tenant and application profile does it belong to?",
-    "Fabric": "What is the status of the fabric '{name}'? List any anomalies and advisories detected in this fabric.",
+    "Fabric": "What is the status of the fabric '{name}'? List the anomalies detected in this fabric.",
     "Anomaly": "Tell me more about this anomaly: '{name}'. What is its severity and which resources are affected? How can I fix it?",
     "HealthSummary": "Show me the health summary details for '{name}'.",
     "VRF": "Tell me about the VRF '{name}'{tenant_context}. Which tenant does it belong to and what is its purpose in the network?",
