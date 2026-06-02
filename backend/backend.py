@@ -1668,12 +1668,12 @@ Selected tools:"""
         if results:
             # Truncate results to fit within token budget.
             # The deployed local model (Mistral Nemo 12B) has an 8192 context cap.
-            # We estimate tokens with tiktoken cl100k_base (GPT-4) but the actual
-            # Mistral tokenizer is denser on JSON, so the same string can be 2-3x
-            # bigger to Mistral than what cl100k counts. Budget conservatively to
-            # leave headroom for the prompt boilerplate, the chat template the
-            # vLLM server injects, and the answer tokens.
-            MAX_RESULT_TOKENS = 2200
+            # We estimate with tiktoken cl100k_base (GPT-4) but the actual Mistral
+            # tokenizer is MUCH denser on JSON - observed ratio: 2185 cl100k tokens
+            # of ND anomaly JSON encoded as 10691 Mistral tokens (~4.9x). So budget
+            # very conservatively: 1200 cl100k = ~5900 Mistral, leaving ~2300 tokens
+            # for the chat template overhead + the answer.
+            MAX_RESULT_TOKENS = 1200
 
             # Use tiktoken for accurate token counting
             try:
@@ -2094,8 +2094,9 @@ Selected tool:"""
 
             # Truncate result to fit token budget
             # Same headroom-for-Mistral reasoning as MAX_RESULT_TOKENS in the ND path:
-            # cl100k_base undercounts Mistral tokens for JSON, so budget conservatively.
-            MAX_INTERSIGHT_TOKENS = 2200
+            # Mistral's tokenizer is ~5x denser on JSON than cl100k_base estimates.
+            # 1200 cl100k = ~5900 Mistral, leaving ~2300 tokens for chat template + answer.
+            MAX_INTERSIGHT_TOKENS = 1200
             result_json = json.dumps(result, indent=2)
 
             try:
