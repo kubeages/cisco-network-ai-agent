@@ -2823,22 +2823,42 @@ Follow-up queries:"""
                 "schema": graph.get_schema
             })
         suggestions = []
-        for line in suggestion_response.content.split("\n"):
-            processed_line = line.strip()
+        raw = suggestion_response.content or ""
+        # Primary split: newlines (the format we ask for in the prompt).
+        # Fallback split: smaller models sometimes glue all three questions onto
+        # one line separated by "? ". So after newline-splitting, if any chunk
+        # still contains more than one terminal '?', split it again on "? ".
+        candidates = []
+        for raw_line in raw.split("\n"):
+            line = raw_line.strip()
+            if not line:
+                continue
+            # If a single line carries multiple questions, separate them.
+            # Pattern: end of one question (\?) followed by whitespace and the start of
+            # another question (capital letter or quote). Keep the trailing '?'.
+            parts = re.split(r'\?\s+(?=[A-Z"\'])', line)
+            for i, part in enumerate(parts):
+                part = part.strip()
+                if not part:
+                    continue
+                # re.split removed the '?' delimiter from all but the last part
+                if i < len(parts) - 1 and not part.endswith("?"):
+                    part += "?"
+                candidates.append(part)
+
+        for processed_line in candidates:
+            if processed_line.startswith("- "):
+                processed_line = processed_line[2:]
+            elif processed_line.startswith("* "):
+                processed_line = processed_line[2:]
+            m = re.match(r"^\d+\.\s*", processed_line)
+            if m:
+                processed_line = processed_line[m.end():]
             if processed_line:
-                if processed_line.startswith("- "):
-                    processed_line = processed_line[2:]
-                elif processed_line.startswith("* "):
-                    processed_line = processed_line[2:]
-                match = re.match(r"^\d+\.\s*", processed_line)
-                if match:
-                    processed_line = processed_line[match.end():]
-                if processed_line:
-                    # Strip enclosing quotes (LLM often wraps suggestions in quotes)
-                    if (processed_line.startswith('"') and processed_line.endswith('"')) or \
-                       (processed_line.startswith("'") and processed_line.endswith("'")):
-                        processed_line = processed_line[1:-1]
-                    suggestions.append(processed_line)
+                if (processed_line.startswith('"') and processed_line.endswith('"')) or \
+                   (processed_line.startswith("'") and processed_line.endswith("'")):
+                    processed_line = processed_line[1:-1]
+                suggestions.append(processed_line)
         print(f"✅ Generated suggestions: {suggestions}")
         return {"suggestions": suggestions}
     except Exception as e:
