@@ -2068,15 +2068,17 @@ Selected tool:"""
                     )
                     if endpoint_rows:
                         print(f"🔗 Enriching with {len(endpoint_rows)} correlated endpoint(s) from Neo4j")
-                        if isinstance(result, dict):
-                            result["correlatedEndpointsFromAci"] = endpoint_rows
+                        _aci_endpoint_rows = endpoint_rows
                         _aci_endpoint_count = len(endpoint_rows)
                     else:
+                        _aci_endpoint_rows = []
                         _aci_endpoint_count = 0
                 except Exception as e:
                     print(f"⚠️ Endpoint enrichment failed: {e}")
+                    _aci_endpoint_rows = []
                     _aci_endpoint_count = 0
             else:
+                _aci_endpoint_rows = []
                 _aci_endpoint_count = 0
 
             # Track data source(s)
@@ -2147,22 +2149,33 @@ Selected tool:"""
                     f"when the requested name appears in any row's Name field."
                 )
 
+            # Build the ACI-attachment block separately from the JSON so the
+            # JSON-truncation logic can't ever cut it off. The Mistral model has
+            # been observed denying connectivity exists when the enrichment got
+            # truncated; placing this block above the JSON makes it survive.
+            aci_attachment_block = ""
+            if _aci_endpoint_rows:
+                lines = ["", "ACI ATTACHMENT (from Neo4j MAC correlation - this is REAL connectivity data):"]
+                for row in _aci_endpoint_rows:
+                    iface = row.get("interface") or "?"
+                    mac = row.get("mac") or "?"
+                    epg = row.get("epg") or "(no EPG)"
+                    ap = row.get("app_profile") or "(no AppProfile)"
+                    tn = row.get("tenant") or "(no Tenant)"
+                    lines.append(f"  - vNIC `{iface}` (MAC {mac}) -> EPG `{epg}` in AppProfile `{ap}` / tenant `{tn}`")
+                lines.append(
+                    "When the user asks about EPGs, tenants, network adapters, vNICs, or "
+                    "connectivity for this server, you MUST list these rows verbatim above. "
+                    "Do NOT claim the server has no EPG or tenant attachment - the rows above are it."
+                )
+                aci_attachment_block = "\n".join(lines)
+
             synthesis_prompt = f"""Based on the following Cisco Intersight compute/server data, provide a clear answer to the question.
 
-Question: {question}{matched_entity_note}
+Question: {question}{matched_entity_note}{aci_attachment_block}
 
 Intersight Data:
 {result_json}{truncation_note}
-
-IMPORTANT - If the JSON above contains a `correlatedEndpointsFromAci` array, those rows
-come from the Cisco ACI fabric (correlated by MAC). Each row has: interface (vNIC name
-like `ts-eth-a`/`ts-iscsi-a`), mac, ip, epg, app_profile, tenant. When answering ANY
-question about network adapters, vNICs, connectivity, EPGs, tenants, or "what is this
-server attached to", you MUST list each correlated endpoint with its EPG name, app
-profile, and tenant. Format example:
-  - vNIC `ts-eth-a` (MAC 00:25:B5:56:65:35) -> EPG `nodes` in AppProfile `titansphere` /
-    tenant `titansphere`
-This is the connectivity context the user is asking about - do not omit it.
 
 LIVE TELEMETRY ABSENCE - The tool used (`list_compute_servers` or
 `list_fabric_interconnects`) returns the inventory record only: it includes
