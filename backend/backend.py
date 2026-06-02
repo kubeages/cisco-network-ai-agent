@@ -1666,9 +1666,14 @@ Selected tools:"""
                     continue
 
         if results:
-            # Truncate results to fit within token budget
-            # Target: ~4000 tokens for results (leave 4000 for prompt + answer + overhead)
-            MAX_RESULT_TOKENS = 4000
+            # Truncate results to fit within token budget.
+            # The deployed local model (Mistral Nemo 12B) has an 8192 context cap.
+            # We estimate tokens with tiktoken cl100k_base (GPT-4) but the actual
+            # Mistral tokenizer is denser on JSON, so the same string can be 2-3x
+            # bigger to Mistral than what cl100k counts. Budget conservatively to
+            # leave headroom for the prompt boilerplate, the chat template the
+            # vLLM server injects, and the answer tokens.
+            MAX_RESULT_TOKENS = 2200
 
             # Use tiktoken for accurate token counting
             try:
@@ -2088,7 +2093,9 @@ Selected tool:"""
                 ))
 
             # Truncate result to fit token budget
-            MAX_INTERSIGHT_TOKENS = 4000
+            # Same headroom-for-Mistral reasoning as MAX_RESULT_TOKENS in the ND path:
+            # cl100k_base undercounts Mistral tokens for JSON, so budget conservatively.
+            MAX_INTERSIGHT_TOKENS = 2200
             result_json = json.dumps(result, indent=2)
 
             try:
