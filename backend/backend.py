@@ -2128,10 +2128,28 @@ Selected tool:"""
                 result_json = result_json[:left] + "\n... (truncated due to size)"
                 truncation_note = f"\n\nNote: Result truncated from {result_tokens} to ~{MAX_INTERSIGHT_TOKENS} tokens."
 
-            # Synthesize answer from tool result
+            # Synthesize answer from tool result.
+            # Build an explicit "matched entity" header so smaller models (Mistral
+            # Nemo) don't get confused by multiple identifier-like fields on the row
+            # (Name, Serial, Dn, Uuid). Without this guard, the model has been
+            # observed picking the Serial as the "device name" and concluding the
+            # entity the user asked about isn't present - even though we already
+            # post-filtered to exactly that row.
+            matched_entity_note = ""
+            if server_name and "list" in selected_tool.lower():
+                matched_entity_note = (
+                    f"\n\nIMPORTANT - IDENTITY GUARD:\n"
+                    f"The user is asking about the entity named: '{server_name}'.\n"
+                    f"The JSON row(s) below ARE the records for that entity (already filtered).\n"
+                    f"Use the `Name` field as the canonical entity name. `Serial`, `Dn`, and `Uuid`\n"
+                    f"are different identifiers of the same physical device - do NOT treat them as\n"
+                    f"separate or unknown entities. Never respond 'X is not present in the data'\n"
+                    f"when the requested name appears in any row's Name field."
+                )
+
             synthesis_prompt = f"""Based on the following Cisco Intersight compute/server data, provide a clear answer to the question.
 
-Question: {question}
+Question: {question}{matched_entity_note}
 
 Intersight Data:
 {result_json}{truncation_note}
