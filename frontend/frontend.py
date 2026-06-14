@@ -61,14 +61,24 @@ if SPLUNK_ENABLED:
 else:
     print("🔭 Splunk Observability disabled (set SPLUNK_OBSERVABILITY_ENABLED=true to enable)")
 
-BACKEND_URL = "http://backend-api:8000/ask"
-BACKEND_CAPABILITIES_URL = "http://backend-api:8000/api/capabilities"
-BACKEND_STREAM_URL = "http://backend-api:8000/ask/stream"
-SUGGESTIONS_URL = "http://backend-api:8000/suggestions"
-GRAPH_URL = "http://backend-api:8000/api/graph"
+# In-cluster base URL of the backend Service. Reads BACKEND_URL env var so the same
+# image works on any cluster (fp-ocp Service name "backend-api", ocpai-02 Service name
+# "gbaia-backend", etc.). Trailing slash stripped to make path joins predictable.
+_BACKEND_BASE = os.getenv("BACKEND_URL", "http://backend-api:8000").rstrip("/")
+BACKEND_URL = f"{_BACKEND_BASE}/ask"
+BACKEND_CAPABILITIES_URL = f"{_BACKEND_BASE}/api/capabilities"
+BACKEND_STREAM_URL = f"{_BACKEND_BASE}/ask/stream"
+SUGGESTIONS_URL = f"{_BACKEND_BASE}/suggestions"
+GRAPH_URL = f"{_BACKEND_BASE}/api/graph"
 
-# External HTTPS URL for browser JavaScript (uses OpenShift route)
-BACKEND_CAPABILITIES_EXTERNAL_URL = "https://backend-api-gbaia.apps.fp-ocp.amsdmz.local/api/capabilities"
+# External HTTPS URL for browser JavaScript (uses the OpenShift Route that exposes the
+# backend's /api/capabilities). Reads BACKEND_EXTERNAL_URL env var; falls back to the
+# fp-ocp route for backwards compatibility with the original deployment.
+_BACKEND_EXTERNAL_BASE = os.getenv(
+    "BACKEND_EXTERNAL_URL",
+    "https://backend-api-gbaia.apps.fp-ocp.amsdmz.local",
+).rstrip("/")
+BACKEND_CAPABILITIES_EXTERNAL_URL = f"{_BACKEND_EXTERNAL_BASE}/api/capabilities"
 
 # Node styling configuration - J.A.R.V.I.S. cyan/teal palette
 NODE_COLORS = {
