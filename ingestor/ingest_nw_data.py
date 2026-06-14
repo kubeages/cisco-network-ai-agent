@@ -1385,11 +1385,38 @@ def process_apic_data(driver, session, url):
 
 # --- FUNCTIONS FOR NEXUS DASHBOARD ---
 def get_nexus_token(url, user, password):
+    """Authenticate with Nexus Dashboard and return a headers dict to use on all subsequent requests.
+
+    Two auth modes are supported:
+      - Username/password: POST /login → Bearer token in Authorization header (legacy).
+      - API key (auto-detected from 64-char hex format): per-request X-Nd-Apikey + X-Nd-Username
+        headers, no /login round-trip. Newer ND deployments only allow this scheme for
+        service accounts (e.g. dCloud's OB_LAB_AIOPS_RO).
+    Returns a dict of headers on success, None on failure.
+    """
+    import re
+    use_apikey = bool(password and re.fullmatch(r"[0-9a-fA-F]{64}", password))
+
+    if use_apikey:
+        headers = {"X-Nd-Apikey": password, "X-Nd-Username": user}
+        try:
+            # Probe a cheap authenticated endpoint to surface 401 here instead of later.
+            r = requests.get(f"{url}/api/v1/manage/fabrics", headers=headers, verify=False, timeout=15)
+            if r.status_code in (200, 204):
+                print("✅ Nexus Dashboard API key auth verified (X-Nd-Apikey)")
+                return headers
+            print(f"❌ Nexus Dashboard API key auth failed: HTTP {r.status_code} - {r.text[:150]}")
+            return None
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Nexus Dashboard API key probe error: {e}")
+            return None
+
     try:
         response = requests.post(f"{url}/login", json={"userName": user, "password": password}, verify=False)
         response.raise_for_status()
         print("✅ Nexus Dashboard Login successful!")
-        return response.json().get("token")
+        token = response.json().get("token")
+        return {"Authorization": f"Bearer {token}"} if token else None
     except requests.exceptions.RequestException as e:
         print(f"❌ Nexus Dashboard Login failed: {e}")
         return None
@@ -1397,7 +1424,9 @@ def get_nexus_token(url, user, password):
 def process_nexus_dashboard_data(driver, token, url):
     if not token: return
     
-    headers = {"Authorization": f"Bearer {token}"}
+    # `token` is a headers dict returned by get_nexus_token (works for both
+    # legacy Bearer auth and the new X-Nd-Apikey scheme).
+    headers = token
     fabrics_url = f"{url}/api/v1/oneManage/manage/fabricsSummaryBrief"
     print(f"▶️  Fetching fabric list from URL: {fabrics_url}")
     
