@@ -334,6 +334,10 @@ NEO4J_USER = os.getenv("NEO4J_USER")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
 LOCAL_LLM_URL = os.getenv("LOCAL_LLM_URL")
 LOCAL_LLM_TOKEN = os.getenv("LOCAL_LLM_TOKEN")  # Bearer token for authenticated LLM endpoints
+# Model name advertised to the OpenAI-compatible local endpoint. Cluster-portable: defaults
+# to mistral-nemo-12b for the original fp-ocp deployment; the ocpai-02 deployment overrides
+# to qwen3.6-27b. Switch via LOCAL_LLM_MODEL env var in the backend Deployment.
+LOCAL_LLM_MODEL = os.getenv("LOCAL_LLM_MODEL", "mistral-nemo-12b")
 
 # --- Model Proxy Configuration (for AI Defense Validation) ---
 MODEL_PROXY_ENABLED = os.getenv("MODEL_PROXY_ENABLED", "false").lower() == "true"
@@ -445,7 +449,7 @@ if LOCAL_LLM_URL:
 
     # The model name MUST match the deployed model on the vLLM server
     # Using Cisco-approved GREEN model: Mistral Nemo 12B (Apache 2.0 license)
-    local_model_name = "mistral-nemo-12b"
+    local_model_name = LOCAL_LLM_MODEL
 
     # Use token if provided, otherwise use placeholder
     llm_api_key = LOCAL_LLM_TOKEN if LOCAL_LLM_TOKEN else "EMPTY"
@@ -3279,7 +3283,7 @@ def model_proxy_status():
     return {
         "enabled": MODEL_PROXY_ENABLED,
         "model_url": LOCAL_LLM_URL if MODEL_PROXY_ENABLED else None,
-        "model_name": "mistral-nemo-12b" if LOCAL_LLM_URL else None,
+        "model_name": LOCAL_LLM_MODEL if LOCAL_LLM_URL else None,
         "requires_auth": bool(MODEL_PROXY_API_KEY)
     }
 
@@ -3300,7 +3304,7 @@ async def model_proxy_chat(
 
     # Build the request for vLLM
     vllm_url = f"{LOCAL_LLM_URL}/chat/completions"
-    model_name = request.model or "mistral-nemo-12b"
+    model_name = request.model or LOCAL_LLM_MODEL
 
     payload = {
         "model": model_name,
