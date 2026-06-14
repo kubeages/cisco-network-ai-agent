@@ -1,7 +1,7 @@
 # Containerfile
 
 # Use an official lightweight Python image as a base
-FROM python:3.11-slim
+FROM mirror.gcr.io/library/python:3.11-slim
 
 # Set the working directory inside the container
 WORKDIR /app

@@ -1,5 +1,5 @@
 # Usa una imagen de Python ligera
-FROM python:3.11-slim
+FROM mirror.gcr.io/library/python:3.11-slim
 
 # Establece el directorio de trabajo
 WORKDIR /app
