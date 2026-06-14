@@ -1,5 +1,5 @@
 # Backend API Dockerfile for GBAIA with MCP Integration
-FROM python:3.11-slim
+FROM mirror.gcr.io/library/python:3.11-slim
 
 WORKDIR /app
 
