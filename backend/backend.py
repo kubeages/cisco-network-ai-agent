@@ -338,6 +338,15 @@ LOCAL_LLM_TOKEN = os.getenv("LOCAL_LLM_TOKEN")  # Bearer token for authenticated
 # to mistral-nemo-12b for the original fp-ocp deployment; the ocpai-02 deployment overrides
 # to qwen3.6-27b. Switch via LOCAL_LLM_MODEL env var in the backend Deployment.
 LOCAL_LLM_MODEL = os.getenv("LOCAL_LLM_MODEL", "mistral-nemo-12b")
+# Qwen3 family ships in "thinking" mode by default, emitting a <think>...</think> block
+# before the answer — 2-5x latency. Off by default for chat UX; opt-in for cases where
+# explicit reasoning would help. Only applied when talking to a vLLM-compatible endpoint.
+LOCAL_LLM_DISABLE_THINKING = os.getenv("LOCAL_LLM_DISABLE_THINKING", "true").lower() == "true"
+_LOCAL_LLM_EXTRA_BODY = (
+    {"chat_template_kwargs": {"enable_thinking": False}}
+    if LOCAL_LLM_URL and LOCAL_LLM_DISABLE_THINKING
+    else None
+)
 
 # --- Model Proxy Configuration (for AI Defense Validation) ---
 MODEL_PROXY_ENABLED = os.getenv("MODEL_PROXY_ENABLED", "false").lower() == "true"
@@ -459,21 +468,24 @@ if LOCAL_LLM_URL:
         base_url=LOCAL_LLM_URL,
         api_key=llm_api_key,
         model_name=local_model_name,
-        temperature=0
+        temperature=0,
+        extra_body=_LOCAL_LLM_EXTRA_BODY,
     )
     qa_llm = ChatOpenAI(
         http_client=custom_client,
         base_url=LOCAL_LLM_URL,
         api_key=llm_api_key,
         model_name=local_model_name,
-        temperature=0
+        temperature=0,
+        extra_body=_LOCAL_LLM_EXTRA_BODY,
     )
     suggestion_llm = ChatOpenAI(
         http_client=custom_client,
         base_url=LOCAL_LLM_URL,
         api_key=llm_api_key,
         model_name=local_model_name,
-        temperature=0.3
+        temperature=0.3,
+        extra_body=_LOCAL_LLM_EXTRA_BODY,
     )
 else:
     print("✅ Using OpenAI models (LOCAL_LLM_URL not set).")
@@ -2621,6 +2633,8 @@ async def ask_agent_stream(query: Query):
                 if LOCAL_LLM_URL:
                     streaming_kwargs["base_url"] = LOCAL_LLM_URL
                     streaming_kwargs["api_key"] = LOCAL_LLM_TOKEN if LOCAL_LLM_TOKEN else "EMPTY"
+                    if _LOCAL_LLM_EXTRA_BODY:
+                        streaming_kwargs["extra_body"] = _LOCAL_LLM_EXTRA_BODY
                 streaming_qa_llm = ChatOpenAI(**streaming_kwargs)
 
                 qa_prompt = PromptTemplate.from_template(qa_template)
