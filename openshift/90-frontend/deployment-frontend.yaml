@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    image.openshift.io/triggers: '[{"from":{"kind":"ImageStreamTag","name":"gbaia-frontend:latest"},"fieldPath":"spec.template.spec.containers[?(@.name==\"gbaia-frontend\")].image"}]'
+  labels:
+    app: frontend-app
+    app.kubernetes.io/component: frontend-app
+    app.kubernetes.io/instance: frontend-app
+    app.kubernetes.io/part-of: gbaia
+  name: gbaia-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      deployment: gbaia-frontend
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        deployment: gbaia-frontend
+    spec:
+      containers:
+      - env:
+        - name: BACKEND_URL
+          value: http://gbaia-backend:8000
+        - name: BACKEND_EXTERNAL_URL
+          value: https://gbaia-backend.ai-pod.emear-spin.com
+        image: gbaia-frontend:latest
+        name: gbaia-frontend
+        ports:
+        - containerPort: 7860
+          protocol: TCP
+        resources: {}
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      securityContext: {}
+      terminationGracePeriodSeconds: 30

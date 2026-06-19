@@ -58,8 +58,13 @@ screenshots/
 
 # Folders excluded from this commit (contain demo-specific content)
 # -----------------------------------------------------------------
-openshift/
 demo-flows/
 load_generator/
 scripts/
 claude_resume.sh
+
+# OpenShift deploy bundle — track manifests, not secrets
+# ------------------------------------------------------
+openshift/.env
+openshift/*.pem
+openshift/intersight-private-key*

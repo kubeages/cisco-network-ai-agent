@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: nd-mcp-postgres
+    app.kubernetes.io/part-of: gbaia
+  name: gbaia-nd-mcp-postgres
+spec:
+  ports:
+  - name: postgres
+    port: 5432
+    protocol: TCP
+    targetPort: 5432
+  selector:
+    app: gbaia-nd-mcp-postgres
+  type: ClusterIP

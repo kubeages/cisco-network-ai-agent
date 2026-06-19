@@ -1,0 +1,29 @@
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  labels:
+    app: gbaia-nd-mcp-server
+    app.kubernetes.io/part-of: gbaia
+  name: gbaia-nd-mcp-server
+spec:
+  failedBuildsHistoryLimit: 5
+  output:
+    to:
+      kind: ImageStreamTag
+      name: gbaia-nd-mcp-server:latest
+  runPolicy: Serial
+  source:
+    git:
+      ref: main
+      uri: https://github.com/kubeages/nexus-dashboard-mcp.git
+    type: Git
+  strategy:
+    dockerStrategy:
+      dockerfilePath: Dockerfile
+      from:
+        kind: DockerImage
+        name: mirror.gcr.io/library/python:3.11-slim
+    type: Docker
+  successfulBuildsHistoryLimit: 5
+  triggers:
+  - type: ConfigChange

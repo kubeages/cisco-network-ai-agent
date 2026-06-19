@@ -1,0 +1,109 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    kubernetes.io/change-cause: oc set image deployment/apic-ingestor ingestor=docker.io/agallego/gbaia-ingestor:latest --namespace=gbaia --record=true
+    image.openshift.io/triggers: '[{"from":{"kind":"ImageStreamTag","name":"gbaia-ingestor:latest"},"fieldPath":"spec.template.spec.containers[?(@.name==\"ingestor\")].image"}]'
+  labels:
+    app: apic-ingestor
+    app.kubernetes.io/part-of: gbaia
+    component: data-ingestion
+  name: gbaia-apic-ingestor
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gbaia-apic-ingestor
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      annotations:
+        prometheus.io/path: /metrics
+        prometheus.io/port: '9090'
+        prometheus.io/scrape: 'true'
+      labels:
+        app: gbaia-apic-ingestor
+        component: data-ingestion
+    spec:
+      containers:
+      - env:
+        - name: APIC_URL
+          valueFrom:
+            secretKeyRef:
+              key: apic-url
+              name: gbaia-secrets
+        - name: APIC_USER
+          valueFrom:
+            secretKeyRef:
+              key: apic-user
+              name: gbaia-secrets
+        - name: APIC_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: apic-password
+              name: gbaia-secrets
+        - name: ND_URL
+          valueFrom:
+            secretKeyRef:
+              key: nd-url
+              name: gbaia-secrets
+        - name: ND_USER
+          valueFrom:
+            secretKeyRef:
+              key: nd-user
+              name: gbaia-secrets
+        - name: ND_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: nd-password
+              name: gbaia-secrets
+        - name: NEO4J_URI
+          value: bolt://gbaia-neo4j:7687
+        - name: NEO4J_USER
+          value: neo4j
+        - name: NEO4J_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: neo4j-password
+              name: gbaia-secrets
+        - name: SPLUNK_OBSERVABILITY_ENABLED
+          value: 'false'
+        - name: PROMETHEUS_METRICS_ENABLED
+          value: 'true'
+        - name: APIC_FABRIC_NAME
+        - name: INTERSIGHT_API_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              key: api-key-id
+              name: gbaia-intersight-secrets
+        - name: INTERSIGHT_API_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              key: private-key
+              name: gbaia-intersight-secrets
+        - name: INTERSIGHT_BASE_URL
+          valueFrom:
+            secretKeyRef:
+              key: base-url
+              name: gbaia-intersight-secrets
+        image: gbaia-ingestor:latest
+        name: ingestor
+        ports:
+        - containerPort: 9090
+          name: metrics
+          protocol: TCP
+        resources:
+          limits:
+            cpu: 500m
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 256Mi
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      securityContext: {}
+      terminationGracePeriodSeconds: 30

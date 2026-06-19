@@ -1,0 +1,30 @@
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  labels:
+    app: gbaia-nd-mcp-webui
+    app.kubernetes.io/part-of: gbaia
+  name: gbaia-nd-mcp-webui
+spec:
+  failedBuildsHistoryLimit: 5
+  output:
+    to:
+      kind: ImageStreamTag
+      name: gbaia-nd-mcp-webui:latest
+  runPolicy: Serial
+  source:
+    contextDir: web-ui
+    git:
+      ref: main
+      uri: https://github.com/beye91/nexus-dashboard-mcp.git
+    type: Git
+  strategy:
+    dockerStrategy:
+      dockerfilePath: Dockerfile
+      from:
+        kind: DockerImage
+        name: mirror.gcr.io/library/node:18-alpine
+    type: Docker
+  successfulBuildsHistoryLimit: 5
+  triggers:
+  - type: ConfigChange

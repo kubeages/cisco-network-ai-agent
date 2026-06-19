@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: gbaia-intersight-mcp
+    app.kubernetes.io/part-of: gbaia
+  name: gbaia-intersight-mcp
+  annotations:
+    image.openshift.io/triggers: '[{"from":{"kind":"ImageStreamTag","name":"gbaia-intersight-mcp:latest"},"fieldPath":"spec.template.spec.containers[?(@.name==\"intersight-mcp\")].image"}]'
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gbaia-intersight-mcp
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: gbaia-intersight-mcp
+        app.kubernetes.io/part-of: gbaia
+    spec:
+      containers:
+      - env:
+        - name: INTERSIGHT_API_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              key: api-key-id
+              name: gbaia-intersight-secrets
+        - name: INTERSIGHT_API_SECRET_KEY_PATH
+          value: /app/secrets/private_key.pem
+        - name: INTERSIGHT_BASE_URL
+          valueFrom:
+            secretKeyRef:
+              key: base-url-mcp
+              name: gbaia-intersight-secrets
+        - name: INTERSIGHT_TOOL_MODE
+          value: core
+        - name: PORT
+          value: '3000'
+        - name: NODE_ENV
+          value: production
+        image: gbaia-intersight-mcp:latest
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /health
+            port: 3000
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          successThreshold: 1
+          timeoutSeconds: 1
+        name: intersight-mcp
+        ports:
+        - containerPort: 3000
+          name: http
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /health
+            port: 3000
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 1
+        resources: {}
+        volumeMounts:
+        - mountPath: /app/secrets
+          name: intersight-private-key
+          readOnly: true
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - name: intersight-private-key
+        secret:
+          defaultMode: 420
+          items:
+          - key: private-key
+            mode: 292
+            path: private_key.pem
+          secretName: gbaia-intersight-secrets

@@ -1,0 +1,138 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: backend-api
+    app.kubernetes.io/part-of: gbaia
+    component: api
+  name: gbaia-backend
+  annotations:
+    image.openshift.io/triggers: '[{"from":{"kind":"ImageStreamTag","name":"gbaia-backend:latest"},"fieldPath":"spec.template.spec.containers[?(@.name==\"backend\")].image"}]'
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: gbaia-backend
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: gbaia-backend
+        component: api
+    spec:
+      containers:
+      - env:
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              key: openai-api-key
+              name: gbaia-secrets
+        - name: NEO4J_URI
+          value: bolt://gbaia-neo4j:7687
+        - name: NEO4J_USER
+          value: neo4j
+        - name: NEO4J_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: neo4j-password
+              name: gbaia-secrets
+        - name: LOCAL_LLM_URL
+          value: http://qwen36-27b.runai-shared-models.svc:8000/v1
+        - name: LOCAL_LLM_TOKEN
+          valueFrom:
+            secretKeyRef:
+              key: local-llm-token
+              name: gbaia-secrets
+              optional: true
+        - name: SPLUNK_OBSERVABILITY_ENABLED
+          value: 'false'
+        - name: AI_DEFENSE_ENABLED
+          value: 'false'
+        - name: AI_DEFENSE_ENDPOINT
+          value: https://us.api.inspect.aidefense.security.cisco.com
+        - name: AI_DEFENSE_API_KEY
+          valueFrom:
+            secretKeyRef:
+              key: ai-defense-api-key
+              name: gbaia-secrets
+              optional: true
+        - name: AI_DEFENSE_INSPECT_PROMPTS
+          value: 'true'
+        - name: AI_DEFENSE_INSPECT_RESPONSES
+          value: 'true'
+        - name: AI_DEFENSE_USE_POLICY
+          value: 'true'
+        - name: MODEL_PROXY_ENABLED
+          value: 'false'
+        - name: MODEL_PROXY_API_KEY
+          valueFrom:
+            secretKeyRef:
+              key: model-proxy-api-key
+              name: gbaia-secrets
+              optional: true
+        - name: MCP_ENABLED
+          value: 'true'
+        - name: MCP_SERVER_URL
+          value: http://gbaia-nd-mcp-server:7443
+        - name: APIC_FABRIC_NAME
+        - name: INTERSIGHT_MCP_ENABLED
+          value: 'true'
+        - name: INTERSIGHT_MCP_URL
+          value: http://gbaia-intersight-mcp:3000
+        - name: LOCAL_LLM_MODEL
+          value: qwen3.6-27b
+        - name: MCP_TOKEN
+          valueFrom:
+            secretKeyRef:
+              key: MCP_API_TOKEN
+              name: gbaia-nd-mcp-secrets
+        - name: LOCAL_LLM_DISABLE_THINKING
+          value: 'true'
+        image: gbaia-backend:latest
+        livenessProbe:
+          failureThreshold: 5
+          httpGet:
+            path: /api/health
+            port: 8000
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          successThreshold: 1
+          timeoutSeconds: 15
+        name: backend
+        ports:
+        - containerPort: 8000
+          name: http
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /api/health
+            port: 8000
+            scheme: HTTP
+          initialDelaySeconds: 15
+          periodSeconds: 5
+          successThreshold: 1
+          timeoutSeconds: 3
+        resources:
+          limits:
+            cpu: '1'
+            memory: 1Gi
+          requests:
+            cpu: 250m
+            memory: 512Mi
+        volumeMounts:
+        - mountPath: /data
+          name: config
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - name: config
+        persistentVolumeClaim:
+          claimName: gbaia-config-pvc

@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: nd-mcp-webui
+    app.kubernetes.io/part-of: gbaia
+  name: gbaia-nd-mcp-webui
+spec:
+  ports:
+  - name: http
+    port: 7443
+    protocol: TCP
+    targetPort: 7443
+  selector:
+    app: gbaia-nd-mcp-webui
+  type: ClusterIP

@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: neo4j
+    app.kubernetes.io/part-of: gbaia
+  name: gbaia-neo4j
+spec:
+  ports:
+  - name: http
+    port: 7474
+    protocol: TCP
+    targetPort: 7474
+  - name: bolt
+    port: 7687
+    protocol: TCP
+    targetPort: 7687
+  selector:
+    app: gbaia-neo4j
+  type: ClusterIP

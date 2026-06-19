@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: frontend-app
+    app.kubernetes.io/part-of: gbaia
+  name: gbaia-frontend
+spec:
+  ports:
+  - name: http
+    port: 7860
+    protocol: TCP
+    targetPort: 7860
+  selector:
+    deployment: gbaia-frontend
+  type: ClusterIP

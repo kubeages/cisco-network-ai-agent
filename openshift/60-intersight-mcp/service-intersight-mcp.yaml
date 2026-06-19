@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: gbaia-intersight-mcp
+    app.kubernetes.io/part-of: gbaia
+  name: gbaia-intersight-mcp
+spec:
+  ports:
+  - name: http
+    port: 3000
+    protocol: TCP
+    targetPort: 3000
+  selector:
+    app: gbaia-intersight-mcp
+  type: ClusterIP

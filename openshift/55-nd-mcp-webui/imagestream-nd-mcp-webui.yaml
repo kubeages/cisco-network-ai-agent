@@ -1,0 +1,10 @@
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  labels:
+    app: gbaia-nd-mcp-webui
+    app.kubernetes.io/part-of: gbaia
+  name: gbaia-nd-mcp-webui
+spec:
+  lookupPolicy:
+    local: false

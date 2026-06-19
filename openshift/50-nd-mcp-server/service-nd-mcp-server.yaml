@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: nd-mcp-server
+    app.kubernetes.io/part-of: gbaia
+  name: gbaia-nd-mcp-server
+spec:
+  ports:
+  - name: https
+    port: 7443
+    protocol: TCP
+    targetPort: 7443
+  - name: mcp-sse
+    port: 8443
+    protocol: TCP
+    targetPort: 8443
+  selector:
+    app: gbaia-nd-mcp-server
+  type: ClusterIP

@@ -1,0 +1,30 @@
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  labels:
+    app: gbaia-ingestor
+    app.kubernetes.io/part-of: gbaia
+  name: gbaia-ingestor
+spec:
+  failedBuildsHistoryLimit: 2
+  output:
+    to:
+      kind: ImageStreamTag
+      name: gbaia-ingestor:latest
+  runPolicy: Serial
+  source:
+    contextDir: ingestor
+    git:
+      ref: main
+      uri: https://github.com/kubeages/cisco-network-ai-agent
+    type: Git
+  strategy:
+    dockerStrategy:
+      dockerfilePath: Dockerfile
+    type: Docker
+  successfulBuildsHistoryLimit: 2
+  triggers:
+  - type: ConfigChange
+  - github:
+      secret: github-webhook-secret
+    type: GitHub

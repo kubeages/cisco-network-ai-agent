@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: neo4j
+    app.kubernetes.io/part-of: gbaia
+    component: database
+  name: gbaia-neo4j
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gbaia-neo4j
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: gbaia-neo4j
+        component: database
+    spec:
+      containers:
+      - env:
+        - name: NEO4J_AUTH
+          valueFrom:
+            secretKeyRef:
+              key: neo4j-auth
+              name: gbaia-secrets
+        - name: NEO4J_PLUGINS
+          value: '["apoc"]'
+        - name: NEO4J_server_config_strict__validation_enabled
+          value: 'false'
+        image: mirror.gcr.io/library/neo4j:5
+        livenessProbe:
+          failureThreshold: 3
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          successThreshold: 1
+          tcpSocket:
+            port: 7687
+          timeoutSeconds: 5
+        name: neo4j
+        ports:
+        - containerPort: 7474
+          name: http
+          protocol: TCP
+        - containerPort: 7687
+          name: bolt
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 3
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          successThreshold: 1
+          tcpSocket:
+            port: 7687
+          timeoutSeconds: 5
+        resources:
+          limits:
+            cpu: '1'
+            memory: 2Gi
+          requests:
+            cpu: 500m
+            memory: 1Gi
+        volumeMounts:
+        - mountPath: /data
+          name: neo4j-data
+        - mountPath: /logs
+          name: neo4j-logs
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - name: neo4j-data
+        persistentVolumeClaim:
+          claimName: gbaia-neo4j-data-pvc
+      - name: neo4j-logs
+        persistentVolumeClaim:
+          claimName: gbaia-neo4j-logs-pvc

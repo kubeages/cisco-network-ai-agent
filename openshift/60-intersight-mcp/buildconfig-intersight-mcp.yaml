@@ -1,0 +1,26 @@
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  labels:
+    app: gbaia-intersight-mcp
+    app.kubernetes.io/part-of: gbaia
+  name: gbaia-intersight-mcp
+spec:
+  failedBuildsHistoryLimit: 5
+  output:
+    to:
+      kind: ImageStreamTag
+      name: gbaia-intersight-mcp:latest
+  runPolicy: Serial
+  source:
+    git:
+      ref: main
+      uri: https://github.com/jim-coyne/Intersight_MCP.git
+    type: Git
+  strategy:
+    dockerStrategy:
+      from:
+        kind: DockerImage
+        name: mirror.gcr.io/library/node:18-alpine
+    type: Docker
+  successfulBuildsHistoryLimit: 5

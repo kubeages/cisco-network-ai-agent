@@ -1,0 +1,10 @@
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  labels:
+    app: gbaia-intersight-mcp
+    app.kubernetes.io/part-of: gbaia
+  name: gbaia-intersight-mcp
+spec:
+  lookupPolicy:
+    local: false

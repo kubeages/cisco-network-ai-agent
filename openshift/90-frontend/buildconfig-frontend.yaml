@@ -1,0 +1,30 @@
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  labels:
+    app: gbaia-frontend
+    app.kubernetes.io/part-of: gbaia
+  name: gbaia-frontend
+spec:
+  failedBuildsHistoryLimit: 5
+  output:
+    to:
+      kind: ImageStreamTag
+      name: gbaia-frontend:latest
+  runPolicy: Serial
+  source:
+    contextDir: frontend
+    git:
+      ref: main
+      uri: https://github.com/kubeages/cisco-network-ai-agent
+    type: Git
+  strategy:
+    dockerStrategy:
+      dockerfilePath: Containerfile
+    type: Docker
+  successfulBuildsHistoryLimit: 5
+  triggers:
+  - type: ConfigChange
+  - github:
+      secret: github-webhook-secret
+    type: GitHub
