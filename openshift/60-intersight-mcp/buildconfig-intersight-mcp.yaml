@@ -7,20 +7,40 @@ metadata:
   name: gbaia-intersight-mcp
 spec:
   failedBuildsHistoryLimit: 5
+  successfulBuildsHistoryLimit: 5
+  runPolicy: Serial
   output:
     to:
       kind: ImageStreamTag
       name: gbaia-intersight-mcp:latest
-  runPolicy: Serial
   source:
+    type: Git
     git:
       ref: main
       uri: https://github.com/jim-coyne/Intersight_MCP.git
-    type: Git
+    # Inline Dockerfile that overrides the one in the upstream repo. The
+    # upstream Dockerfile expects a pre-built `build/` dir to exist, which it
+    # doesn't in git — you have to run `npm run build` first. Rather than fork
+    # the repo, we override the Dockerfile here so the build is self-contained
+    # on any cluster.
+    dockerfile: |
+      FROM mirror.gcr.io/library/node:18-alpine
+      WORKDIR /app
+      COPY package*.json ./
+      COPY tsconfig.json ./
+      RUN npm ci
+      COPY src/ ./src/
+      RUN npm run build && npm prune --production
+      ENV NODE_ENV=production
+      EXPOSE 3000
+      # HTTP mode (not stdio) — upstream ships two entry points; the k8s Service
+      # on port 3000 needs the HTTP one.
+      CMD ["node", "build/http-server.js"]
   strategy:
+    type: Docker
     dockerStrategy:
       from:
         kind: DockerImage
         name: mirror.gcr.io/library/node:18-alpine
-    type: Docker
-  successfulBuildsHistoryLimit: 5
+  triggers:
+  - type: ConfigChange

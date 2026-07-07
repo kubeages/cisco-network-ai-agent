@@ -85,19 +85,4 @@ for k,v in d['data_sources'].items(): print(f'  {k}: available={v.get(\"availabl
 You should see APIC, Nexus Dashboard, and Intersight all `available=True` once
 the first ingestor cycle completes (~30s after the ingestor pod is ready).
 
-## Removing nd-mcp-webui (optional)
 
-The webui build currently fails (multi-stage Dockerfile + strict short-name
-mode in OpenShift CRI-O — not worth fixing for what is just an admin UI).
-Either skip the dir or `oc -n $NAMESPACE delete -f openshift/55-nd-mcp-webui/`.
-
-## What's intentionally NOT included here
-
-- **ImageStream `vlab-llm-secret` references** — old manifests had the backend
-  reading the LLM bearer token from `vlab-llm-secret` (a per-cluster secret).
-  Now read from `gbaia-secrets.local-llm-token` instead, so the deploy stays
-  self-contained.
-- **HPA / ScaledObject** — none were in use on the source cluster; add later
-  if needed (fp-ocp had a KEDA-based one against ThanosQuerier).
-- **Network Policies** — Cilium policies are out of scope for this bundle. See
-  `project_cilium_zero_trust_analysis.md` in the memory index.

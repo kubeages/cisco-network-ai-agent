@@ -7,23 +7,45 @@ metadata:
   name: gbaia-nd-mcp-server
 spec:
   failedBuildsHistoryLimit: 5
+  successfulBuildsHistoryLimit: 5
+  runPolicy: Serial
   output:
     to:
       kind: ImageStreamTag
       name: gbaia-nd-mcp-server:latest
-  runPolicy: Serial
   source:
+    type: Git
     git:
       ref: main
       uri: https://github.com/kubeages/nexus-dashboard-mcp.git
-    type: Git
+    # Inline single-stage Dockerfile that overrides the upstream multi-stage
+    # one. Reasons:
+    #   1. Upstream uses `pip install --user` → packages land in /root/.local
+    #      which OpenShift's random-UID SCC can't read at runtime.
+    #   2. Upstream's Stage 2 has a bare `FROM python:3.11-slim` that CRI-O's
+    #      strict short-name mode rejects — dockerStrategy.from only overrides
+    #      the FIRST FROM.
+    # Single-stage with system-wide pip install fixes both.
+    dockerfile: |
+      FROM mirror.gcr.io/library/python:3.11-slim
+      WORKDIR /app
+      RUN apt-get update && apt-get install -y --no-install-recommends \
+              gcc libpq-dev libpq5 \
+          && rm -rf /var/lib/apt/lists/*
+      COPY requirements.txt .
+      RUN pip install --no-cache-dir -r requirements.txt
+      COPY src/ ./src/
+      COPY openapi_specs/ ./openapi_specs/
+      COPY scripts/ ./scripts/
+      COPY docs/ ./docs/
+      ENV PYTHONUNBUFFERED=1 PYTHONPATH=/app
+      EXPOSE 7443
+      CMD ["python", "src/main.py"]
   strategy:
+    type: Docker
     dockerStrategy:
-      dockerfilePath: Dockerfile
       from:
         kind: DockerImage
         name: mirror.gcr.io/library/python:3.11-slim
-    type: Docker
-  successfulBuildsHistoryLimit: 5
   triggers:
   - type: ConfigChange

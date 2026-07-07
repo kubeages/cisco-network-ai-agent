@@ -49,6 +49,7 @@ oc -n "$NAMESPACE" create secret generic gbaia-secrets \
     --from-literal=nd-user="${ND_USER:-}" \
     --from-literal=nd-password="${ND_PASSWORD:-}" \
     --from-literal=neo4j-password="${NEO4J_PASSWORD:-changeme}" \
+    --from-literal=neo4j-auth="neo4j/${NEO4J_PASSWORD:-changeme}" \
     --from-literal=openai-api-key="${OPENAI_API_KEY:-}" \
     --from-literal=local-llm-token="${LOCAL_LLM_TOKEN:-}" \
     --from-literal=ai-defense-api-key="${AI_DEFENSE_API_KEY:-}" \
