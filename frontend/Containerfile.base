@@ -1,0 +1,20 @@
+# Frontend BASE image — heavy Python deps live here.
+#
+# Rebuilt ONLY when requirements.txt (or system deps) change.
+# The lightweight Containerfile sits on top and just copies source, giving
+# ~15s rebuilds instead of 10-15min every time frontend.py changes.
+FROM mirror.gcr.io/library/python:3.11
+
+# System deps: gradio + Pillow wheels need these headers
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        libjpeg-dev \
+        zlib1g-dev \
+        unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Python deps — the expensive layer (gradio itself is ~60 MB)
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt

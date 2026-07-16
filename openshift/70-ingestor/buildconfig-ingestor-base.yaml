@@ -1,0 +1,30 @@
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  labels:
+    app: gbaia-ingestor
+    app.kubernetes.io/part-of: gbaia
+  name: gbaia-ingestor-base
+spec:
+  failedBuildsHistoryLimit: 3
+  successfulBuildsHistoryLimit: 2
+  runPolicy: Serial
+  output:
+    to:
+      kind: ImageStreamTag
+      name: gbaia-ingestor-base:latest
+  source:
+    type: Git
+    git:
+      ref: main
+      uri: https://github.com/kubeages/cisco-network-ai-agent
+    contextDir: ingestor
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Dockerfile.base
+      from:
+        kind: DockerImage
+        name: mirror.gcr.io/library/python:3.11-slim
+  # No ConfigChange trigger — rebuild MANUALLY when requirements.txt
+  # changes: `oc start-build gbaia-ingestor-base`.

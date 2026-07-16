@@ -148,7 +148,7 @@ if [[ "$SKIP_BUILDS" == "0" ]]; then
   # After the base is built once, it's rarely rebuilt (only when
   # requirements.txt changes) — see the top of README.
   say "Seed base images (one-time; rebuilt manually when requirements change)"
-  for bc in gbaia-backend-base; do
+  for bc in gbaia-backend-base gbaia-frontend-base gbaia-ingestor-base; do
     if oc -n "$NAMESPACE" get bc/$bc >/dev/null 2>&1; then
       # Skip if the base was already built successfully (idempotent re-runs)
       last_phase=$(oc -n "$NAMESPACE" get bc/$bc -o jsonpath='{.status.lastVersion}' 2>/dev/null)

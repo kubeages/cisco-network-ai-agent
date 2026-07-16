@@ -1,0 +1,30 @@
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  labels:
+    app: gbaia-frontend
+    app.kubernetes.io/part-of: gbaia
+  name: gbaia-frontend-base
+spec:
+  failedBuildsHistoryLimit: 3
+  successfulBuildsHistoryLimit: 2
+  runPolicy: Serial
+  output:
+    to:
+      kind: ImageStreamTag
+      name: gbaia-frontend-base:latest
+  source:
+    type: Git
+    git:
+      ref: main
+      uri: https://github.com/kubeages/cisco-network-ai-agent
+    contextDir: frontend
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Containerfile.base
+      from:
+        kind: DockerImage
+        name: mirror.gcr.io/library/python:3.11
+  # No ConfigChange trigger — rebuild MANUALLY when requirements.txt
+  # changes: `oc start-build gbaia-frontend-base`.

@@ -19,12 +19,24 @@ spec:
       uri: https://github.com/kubeages/cisco-network-ai-agent
     type: Git
   strategy:
+    type: Docker
     dockerStrategy:
       dockerfilePath: Dockerfile
-    type: Docker
+      # Override the placeholder FROM in ingestor/Dockerfile with the
+      # cluster-local base image that has all the pip deps pre-installed.
+      # Turns app rebuilds from ~5 min into ~10 s.
+      from:
+        kind: ImageStreamTag
+        name: gbaia-ingestor-base:latest
   successfulBuildsHistoryLimit: 2
   triggers:
   - type: ConfigChange
   - github:
       secret: github-webhook-secret
     type: GitHub
+  # Rebuild the app whenever the base is refreshed (requirements.txt bumps).
+  - type: ImageChange
+    imageChange:
+      from:
+        kind: ImageStreamTag
+        name: gbaia-ingestor-base:latest

@@ -19,12 +19,24 @@ spec:
       uri: https://github.com/kubeages/cisco-network-ai-agent
     type: Git
   strategy:
+    type: Docker
     dockerStrategy:
       dockerfilePath: Containerfile
-    type: Docker
+      # Override the placeholder FROM in frontend/Containerfile with the
+      # cluster-local base image that has all the pip deps pre-installed.
+      # Turns app rebuilds from ~10-15 min into ~15 s.
+      from:
+        kind: ImageStreamTag
+        name: gbaia-frontend-base:latest
   successfulBuildsHistoryLimit: 5
   triggers:
   - type: ConfigChange
   - github:
       secret: github-webhook-secret
     type: GitHub
+  # Rebuild the app whenever the base is refreshed (requirements.txt bumps).
+  - type: ImageChange
+    imageChange:
+      from:
+        kind: ImageStreamTag
+        name: gbaia-frontend-base:latest

@@ -1,0 +1,15 @@
+# Ingestor BASE image — heavy Python deps live here.
+#
+# Rebuilt ONLY when requirements.txt changes. The lightweight Dockerfile
+# sits on top and just copies source, giving ~10s rebuilds instead of
+# ~5 min every time ingest_nw_data.py changes.
+FROM mirror.gcr.io/library/python:3.11-slim
+
+WORKDIR /app
+
+# Python deps — the expensive layer (neo4j-driver, intersight SDK,
+# opentelemetry, prometheus-client, requests, urllib3, etc.)
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+ENV PYTHONUNBUFFERED=1

@@ -1,20 +1,20 @@
+# Frontend APP image — thin overlay on gbaia-frontend-base.
+#
+# The FROM line is a PLACEHOLDER. The OpenShift BuildConfig's
+# `strategy.dockerStrategy.from` overrides it to the cluster-local
+# `gbaia-frontend-base:latest` ImageStreamTag at build time — keeping this
+# file cluster-portable while inheriting all the pre-installed pip deps
+# (gradio is ~60 MB, so caching it in the base saves ~15 min per rebuild).
+#
+# For a plain `podman build` outside OpenShift, swap the FROM to the base
+# image manually, or add the pip install line back below WORKDIR.
 FROM mirror.gcr.io/library/python:3.11
-
-# Install system dependencies 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    libjpeg-dev \
-    zlib1g-dev \
-    unzip \
-    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Force cache invalidation for frontend.py changes
-ARG CACHEBUST=1
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir --force-reinstall -r requirements.txt
+# App code only — pip deps already installed in the base layer
 COPY frontend.py .
+
 EXPOSE 7860
+
 CMD ["python", "-u", "frontend.py"]
