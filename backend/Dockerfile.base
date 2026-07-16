@@ -1,0 +1,19 @@
+# Backend BASE image — heavy Python deps live here.
+#
+# This is rebuilt ONLY when requirements.txt (or system deps) change.
+# The lightweight `Dockerfile` sits on top and just copies source, giving
+# ~30s rebuilds instead of 15-20min every time backend.py changes.
+FROM mirror.gcr.io/library/python:3.11-slim
+
+WORKDIR /app
+
+# System deps needed to compile scipy / cryptography wheels
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Python deps — this is the expensive layer
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+ENV PYTHONUNBUFFERED=1 PYTHONPATH=/app

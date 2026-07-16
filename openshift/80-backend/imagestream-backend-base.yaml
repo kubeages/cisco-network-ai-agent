@@ -1,0 +1,10 @@
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  labels:
+    app: gbaia-backend
+    app.kubernetes.io/part-of: gbaia
+  name: gbaia-backend-base
+spec:
+  lookupPolicy:
+    local: false

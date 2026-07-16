@@ -1,0 +1,32 @@
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  labels:
+    app: gbaia-backend
+    app.kubernetes.io/part-of: gbaia
+  name: gbaia-backend-base
+spec:
+  failedBuildsHistoryLimit: 3
+  successfulBuildsHistoryLimit: 2
+  runPolicy: Serial
+  output:
+    to:
+      kind: ImageStreamTag
+      name: gbaia-backend-base:latest
+  source:
+    type: Git
+    git:
+      ref: main
+      uri: https://github.com/kubeages/cisco-network-ai-agent
+    contextDir: backend
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Dockerfile.base
+      from:
+        kind: DockerImage
+        name: mirror.gcr.io/library/python:3.11-slim
+  # No ConfigChange trigger — rebuild MANUALLY when requirements.txt or
+  # system deps change: `oc start-build gbaia-backend-base`.
+  # This is deliberate — we don't want every git push to invalidate the
+  # cached deps layer.

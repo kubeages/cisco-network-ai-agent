@@ -142,7 +142,27 @@ fi
 
 # --- 5. kick builds (optional) ---
 if [[ "$SKIP_BUILDS" == "0" ]]; then
-  say "Trigger builds"
+  # 5a. Base images first — expensive dep layers. On a fresh cluster these
+  # must exist before their app builds can succeed (the app BCs use
+  # `strategy.from: ImageStreamTag <svc>-base:latest` — no base = no build).
+  # After the base is built once, it's rarely rebuilt (only when
+  # requirements.txt changes) — see the top of README.
+  say "Seed base images (one-time; rebuilt manually when requirements change)"
+  for bc in gbaia-backend-base; do
+    if oc -n "$NAMESPACE" get bc/$bc >/dev/null 2>&1; then
+      # Skip if the base was already built successfully (idempotent re-runs)
+      last_phase=$(oc -n "$NAMESPACE" get bc/$bc -o jsonpath='{.status.lastVersion}' 2>/dev/null)
+      if [[ -n "$last_phase" && "$last_phase" != "0" ]]; then
+        ok "$bc already built (v$last_phase) — skipping"
+        continue
+      fi
+      oc -n "$NAMESPACE" start-build "$bc" --follow=false >/dev/null && ok "started $bc (this can take ~15 min the first time)" || warn "could not start $bc"
+    fi
+  done
+
+  # 5b. App-side builds — these are fast (~30s) once the base image exists.
+  # ImageChange triggers will also auto-rebuild the app when the base is refreshed.
+  say "Trigger app builds"
   for bc in gbaia-backend gbaia-frontend gbaia-ingestor gbaia-nd-mcp-server gbaia-intersight-mcp; do
     if oc -n "$NAMESPACE" get bc/$bc >/dev/null 2>&1; then
       oc -n "$NAMESPACE" start-build "$bc" --follow=false >/dev/null && ok "started $bc" || warn "could not start $bc"
