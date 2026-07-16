@@ -1396,6 +1396,26 @@ def classify_query_intent(question: str) -> str:
             print(f"🖥️  Intersight query detected (Fabric Interconnect pattern in entity)")
             return "intersight"
 
+    # ACI fabric nodes (spines, leaves, APIC controllers) live in Neo4j with
+    # the plain `Node` label. Route these to Neo4j — role/model/status/faults
+    # are all static topology facts, not live metrics. Without this, questions
+    # about a specific ACI node fall through to the MCP tool selector which
+    # then picks unrelated ND tools because ND calls them "anomalies", not
+    # "faults", and there is no ND concept of an APIC controller anyway.
+    if candidate_entities:
+        try:
+            for entity_name in candidate_entities:
+                result = graph.query(
+                    "MATCH (n:Node) WHERE n.name = $name RETURN 1 LIMIT 1",
+                    params={"name": entity_name}
+                )
+                if result:
+                    src = "quoted" if entity_name in quoted_entities else "unquoted"
+                    print(f"🕸  Neo4j query detected ({src} entity '{entity_name}' is an ACI Node)")
+                    return "neo4j"
+        except Exception as e:
+            print(f"⚠️ Error checking ACI Node entity: {e}")
+
     # Keywords indicating Intersight/compute queries
     intersight_keywords = [
         "server", "ucs", "compute", "blade", "rack unit", "chassis",
@@ -1508,13 +1528,13 @@ async def query_mcp_with_llm(question: str, chat_history: str = "") -> tuple[str
         # Keyword-based filtering to narrow down candidates
         candidate_tools = []
 
-        # Check for specific queries BEFORE generic ones to avoid wrong tool selection
-        if "anomal" in question_lower:
-            # Anomaly queries - prioritize anomaly tools
+        # Check for specific queries BEFORE generic ones to avoid wrong tool selection.
+        # ND vocabulary uses "anomaly"; APIC vocabulary uses "fault". Users ask for
+        # either — always search ND-MCP for anomaly tools regardless of which word
+        # they used, otherwise the "fault" branch finds zero tools and falls through
+        # to the get/list/describe grab-bag.
+        if "anomal" in question_lower or "fault" in question_lower:
             candidate_tools = [t for t in tools if "anomal" in t.lower()]
-        elif "fault" in question_lower:
-            # Fault queries
-            candidate_tools = [t for t in tools if "fault" in t.lower()]
         elif "compliance" in question_lower:
             candidate_tools = [t for t in tools if "compliance" in t.lower()]
         elif "bandwidth" in question_lower or "traffic" in question_lower:
@@ -1535,8 +1555,15 @@ async def query_mcp_with_llm(question: str, chat_history: str = "") -> tuple[str
         candidate_tools = [t for t in candidate_tools if not (t in seen or seen.add(t))]
 
         if not candidate_tools:
-            # Fallback: search for any get/list/describe tools
-            candidate_tools = [t for t in tools[:50] if any(prefix in t.lower() for prefix in ["get", "list", "describe"])]
+            # No topic-specific ND tool matched. The old fallback grabbed the first
+            # 50 get/list/describe tools, which lets the LLM confidently pick
+            # unrelated ones (e.g. `manage_getDefaultSwitchCredentials` for a
+            # "faults on node X" query). Prefer to bail — the outer router can then
+            # fall through to Neo4j / hybrid, or the user gets a clear "no tool
+            # matches" instead of a confidently-wrong answer built from arbitrary
+            # tools.
+            print(f"⚠️  No ND-MCP tool matched keywords in question — skipping MCP path")
+            return ("No matching ND MCP tools for this question — data may live in the graph instead.", [])
 
         # Use LLM to select the most relevant tools from candidates
         if len(candidate_tools) > 5:
