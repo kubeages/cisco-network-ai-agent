@@ -115,7 +115,7 @@ say "Wire cluster-specific env"
 if [[ -n "${LOCAL_LLM_URL:-}" ]]; then
   oc -n "$NAMESPACE" set env deploy/gbaia-backend \
       LOCAL_LLM_URL="$LOCAL_LLM_URL" \
-      LOCAL_LLM_MODEL="${LOCAL_LLM_MODEL:-qwen3.6-27b}" >/dev/null
+      LOCAL_LLM_MODEL="${LOCAL_LLM_MODEL:-qwen3.8-27b}" >/dev/null
   ok "backend LOCAL_LLM_URL → $LOCAL_LLM_URL"
 fi
 if [[ -n "${BACKEND_EXTERNAL_URL:-}" ]]; then
