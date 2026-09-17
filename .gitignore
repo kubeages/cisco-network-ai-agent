@@ -68,3 +68,9 @@ claude_resume.sh
 openshift/.env
 openshift/*.pem
 openshift/intersight-private-key*
+
+# Local-only asset generation (uses Nano Banana Pro key from .env)
+# ----------------------------------------------------------------
+generate_assets.py
+gfx/
+.venv-gfx/
