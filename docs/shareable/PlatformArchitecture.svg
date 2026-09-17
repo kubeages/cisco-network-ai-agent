@@ -1,0 +1,193 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 920" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">
+  <title>gbaia — Platform Architecture</title>
+
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#546e7a"/>
+    </marker>
+    <marker id="arr-dashed" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8e6c00"/>
+    </marker>
+    <style>
+      .lane-user   { fill:#e3f2fd; stroke:none; }
+      .lane-app    { fill:#f5f7fa; stroke:none; }
+      .lane-data   { fill:#e0f7fa; stroke:none; }
+      .lane-ext    { fill:#eceff1; stroke:none; }
+
+      .lane-label  { font-size:12px; fill:#0b3d91; font-weight:700; letter-spacing:1px; }
+
+      .box-user    { fill:#fff; stroke:#1976d2; stroke-width:2; rx:12; ry:12; }
+      .box-app     { fill:#fff; stroke:#0b3d91; stroke-width:2; rx:12; ry:12; }
+      .box-data    { fill:#fff; stroke:#00838f; stroke-width:2; rx:12; ry:12; }
+      .box-mcp     { fill:#fff; stroke:#6a1b9a; stroke-width:2; rx:12; ry:12; }
+      .box-defense { fill:#fff8e1; stroke:#f57c00; stroke-width:2; rx:12; ry:12; }
+      .box-ext     { fill:#fff; stroke:#455a64; stroke-width:2; stroke-dasharray:5 4; rx:12; ry:12; }
+
+      .title       { font-size:15px; font-weight:600; fill:#263238; }
+      .subtitle    { font-size:11px; fill:#546e7a; }
+      .kind        { font-size:10px; fill:#78909c; font-style:italic; }
+      .link        { stroke:#546e7a; stroke-width:2; fill:none; }
+      .link-bulk   { stroke:#8e6c00; stroke-width:2; fill:none; stroke-dasharray:8 4; }
+      .link-inspect{ stroke:#f57c00; stroke-width:2; fill:none; stroke-dasharray:2 3; }
+      .header      { font-size:22px; font-weight:700; fill:#0b3d91; }
+      .caption     { font-size:12px; fill:#546e7a; font-style:italic; }
+      .badge       { fill:#e8f5e9; stroke:#43a047; stroke-width:1; rx:4; ry:4;}
+      .badge-t     { font-size:10px; fill:#1b5e20; font-weight:600;}
+    </style>
+  </defs>
+
+  <!-- Header -->
+  <text x="30" y="40" class="header">gbaia — Platform Architecture</text>
+  <text x="30" y="62" class="caption">7 workloads inside one OpenShift namespace; 3 external Cisco systems reached over the network.</text>
+
+  <!-- Lanes (horizontal bands) -->
+  <rect x="20"   y="80"  width="1360" height="90"  class="lane-user"   rx="10" ry="10"/>
+  <text x="35"   y="98"  class="lane-label">USER</text>
+
+  <rect x="20"   y="185" width="1360" height="110" class="lane-app"    rx="10" ry="10"/>
+  <text x="35"   y="203" class="lane-label">APPLICATION</text>
+
+  <rect x="20"   y="310" width="1360" height="330" class="lane-data"   rx="10" ry="10"/>
+  <text x="35"   y="328" class="lane-label">IN-CLUSTER DATA + AI</text>
+
+  <rect x="20"   y="655" width="1360" height="200" class="lane-ext"    rx="10" ry="10"/>
+  <text x="35"   y="673" class="lane-label">EXTERNAL CISCO SYSTEMS</text>
+
+  <!-- USER lane -->
+  <rect x="600" y="100" width="200" height="60" class="box-user"/>
+  <text x="700" y="128" text-anchor="middle" class="title">Browser</text>
+  <text x="700" y="148" text-anchor="middle" class="subtitle">operator, on-cluster route</text>
+
+  <!-- APPLICATION lane -->
+  <rect x="360" y="215" width="200" height="70" class="box-app"/>
+  <text x="460" y="243" text-anchor="middle" class="title">gbaia-frontend</text>
+  <text x="460" y="262" text-anchor="middle" class="subtitle">Gradio · Route (edge TLS)</text>
+  <text x="460" y="278" text-anchor="middle" class="kind">port 7860</text>
+
+  <rect x="840" y="215" width="200" height="70" class="box-app"/>
+  <text x="940" y="243" text-anchor="middle" class="title">gbaia-backend</text>
+  <text x="940" y="262" text-anchor="middle" class="subtitle">FastAPI · 2 replicas · Route</text>
+  <text x="940" y="278" text-anchor="middle" class="kind">port 8000</text>
+
+  <!-- IN-CLUSTER DATA + AI lane (grid of components) -->
+  <!-- Row 1 (top) -->
+  <rect x="60"  y="350" width="230" height="90" class="box-data"/>
+  <text x="175" y="378" text-anchor="middle" class="title">gbaia-neo4j</text>
+  <text x="175" y="398" text-anchor="middle" class="subtitle">knowledge graph</text>
+  <text x="175" y="416" text-anchor="middle" class="kind">Fabric · Tenant · EPG ·</text>
+  <text x="175" y="430" text-anchor="middle" class="kind">Node · Server · Chassis · Fault</text>
+
+  <rect x="330" y="350" width="230" height="90" class="box-mcp"/>
+  <text x="445" y="378" text-anchor="middle" class="title">gbaia-nd-mcp-server</text>
+  <text x="445" y="398" text-anchor="middle" class="subtitle">MCP · SSE at /mcp/sse</text>
+  <text x="445" y="416" text-anchor="middle" class="kind">exposes ~150 ND tools</text>
+  <text x="445" y="430" text-anchor="middle" class="kind">X-Nd-Apikey auth (fork patch)</text>
+
+  <rect x="600" y="350" width="230" height="90" class="box-mcp"/>
+  <text x="715" y="378" text-anchor="middle" class="title">gbaia-intersight-mcp</text>
+  <text x="715" y="398" text-anchor="middle" class="subtitle">MCP · HTTP at :3000</text>
+  <text x="715" y="416" text-anchor="middle" class="kind">66 curated Intersight tools</text>
+  <text x="715" y="430" text-anchor="middle" class="kind">HTTP-Signature auth</text>
+
+  <rect x="870" y="350" width="230" height="90" class="box-defense"/>
+  <text x="985" y="378" text-anchor="middle" class="title">AI Defense</text>
+  <text x="985" y="398" text-anchor="middle" class="subtitle">SaaS (us-region) or on-prem</text>
+  <text x="985" y="416" text-anchor="middle" class="kind">/api/v1/inspect/chat</text>
+  <text x="985" y="430" text-anchor="middle" class="kind">console-managed policy</text>
+
+  <rect x="1140" y="350" width="220" height="90" class="box-data"/>
+  <text x="1250" y="378" text-anchor="middle" class="title">vLLM · Qwen 3.6 27B</text>
+  <text x="1250" y="398" text-anchor="middle" class="subtitle">shared model service</text>
+  <text x="1250" y="416" text-anchor="middle" class="kind">OpenAI-compatible /v1</text>
+  <text x="1250" y="430" text-anchor="middle" class="kind">thinking disabled by default</text>
+
+  <!-- Row 2 (bottom of data lane) -->
+  <rect x="60"  y="475" width="230" height="70" class="box-data"/>
+  <text x="175" y="503" text-anchor="middle" class="title">gbaia-nd-mcp-postgres</text>
+  <text x="175" y="522" text-anchor="middle" class="subtitle">MCP session &amp; cluster state</text>
+  <text x="175" y="538" text-anchor="middle" class="kind">PVC · Fernet-encrypted</text>
+
+  <rect x="330" y="475" width="230" height="70" class="box-app"/>
+  <text x="445" y="503" text-anchor="middle" class="title">gbaia-apic-ingestor</text>
+  <text x="445" y="522" text-anchor="middle" class="subtitle">runs every 5 min</text>
+  <text x="445" y="538" text-anchor="middle" class="kind">writes to gbaia-neo4j</text>
+
+  <!-- Row 3 (bottom): image build machinery -->
+  <rect x="600" y="475" width="500" height="70" fill="#fff" stroke="#cfd8dc" stroke-width="1" rx="10" ry="10"/>
+  <text x="850" y="500" text-anchor="middle" class="title">Build pipeline — base + app split</text>
+  <text x="850" y="520" text-anchor="middle" class="subtitle">per service: BuildConfig(base) → ImageStream(base) → BuildConfig(app) → ImageStream(app) → Deployment</text>
+  <text x="850" y="538" text-anchor="middle" class="kind">app rebuilds ~17s once base is warm (was ~20 min pre-split)</text>
+
+  <!-- EXTERNAL lane -->
+  <rect x="60"  y="700" width="260" height="80" class="box-ext"/>
+  <text x="190" y="728" text-anchor="middle" class="title">Cisco APIC</text>
+  <text x="190" y="748" text-anchor="middle" class="subtitle">apic-01.emea-se.dcloud.cisco.com</text>
+  <text x="190" y="766" text-anchor="middle" class="kind">REST · aaaLogin + fv* / faultInst classes</text>
+
+  <rect x="360" y="700" width="260" height="80" class="box-ext"/>
+  <text x="490" y="728" text-anchor="middle" class="title">Cisco Nexus Dashboard</text>
+  <text x="490" y="748" text-anchor="middle" class="subtitle">nd-01.emea-se.dcloud.cisco.com</text>
+  <text x="490" y="766" text-anchor="middle" class="kind">REST · X-Nd-Apikey · /oneManage /analyze</text>
+
+  <rect x="660" y="700" width="260" height="80" class="box-ext"/>
+  <text x="790" y="728" text-anchor="middle" class="title">Cisco Intersight</text>
+  <text x="790" y="748" text-anchor="middle" class="subtitle">eu-central-1.intersight.com</text>
+  <text x="790" y="766" text-anchor="middle" class="kind">REST · HTTP-Signature auth</text>
+
+  <rect x="1080" y="700" width="280" height="80" class="box-defense"/>
+  <text x="1220" y="728" text-anchor="middle" class="title">AI Defense — SaaS (US)</text>
+  <text x="1220" y="748" text-anchor="middle" class="subtitle">us.api.inspect.aidefense.security.cisco.com</text>
+  <text x="1220" y="766" text-anchor="middle" class="kind">only used if in-cluster on-prem AID is absent</text>
+
+  <!-- Links: Browser → Frontend → Backend -->
+  <line x1="700" y1="160" x2="460" y2="215" class="link" marker-end="url(#arr)"/>
+  <line x1="700" y1="160" x2="940" y2="215" class="link" marker-end="url(#arr)"/>
+  <line x1="560" y1="250" x2="840" y2="250" class="link" marker-end="url(#arr)"/>
+
+  <!-- Backend → each data component -->
+  <line x1="900" y1="285" x2="175" y2="350" class="link" marker-end="url(#arr)"/>
+  <text x="240" y="315" class="subtitle">Cypher</text>
+  <line x1="920" y1="285" x2="445" y2="350" class="link" marker-end="url(#arr)"/>
+  <text x="600" y="315" class="subtitle">MCP SSE + Bearer</text>
+  <line x1="960" y1="285" x2="715" y2="350" class="link" marker-end="url(#arr)"/>
+  <line x1="980" y1="285" x2="985" y2="350" class="link-inspect" marker-end="url(#arr)"/>
+  <text x="990" y="315" class="subtitle" fill="#8e6c00">inspect prompt+response</text>
+  <line x1="1000" y1="285" x2="1250" y2="350" class="link" marker-end="url(#arr)"/>
+  <text x="1150" y="315" class="subtitle">OpenAI-compat</text>
+
+  <!-- MCPs ↔ postgres (ND-MCP only) -->
+  <line x1="380" y1="440" x2="230" y2="475" class="link" marker-end="url(#arr)"/>
+  <text x="240" y="465" class="subtitle">state</text>
+
+  <!-- Ingestor bulk-load to external + neo4j -->
+  <line x1="445" y1="545" x2="445" y2="700" class="link-bulk" marker-end="url(#arr-dashed)"/>
+  <text x="455" y="620" class="subtitle" fill="#8e6c00">every 5 min · REST</text>
+  <line x1="445" y1="545" x2="620" y2="700" class="link-bulk" marker-end="url(#arr-dashed)"/>
+  <line x1="445" y1="545" x2="780" y2="700" class="link-bulk" marker-end="url(#arr-dashed)"/>
+  <line x1="330" y1="510" x2="175" y2="440" class="link-bulk" marker-end="url(#arr-dashed)"/>
+  <text x="185" y="465" class="subtitle" fill="#8e6c00">writes</text>
+
+  <!-- MCPs → external -->
+  <line x1="445" y1="440" x2="490" y2="700" class="link" marker-end="url(#arr)"/>
+  <line x1="715" y1="440" x2="790" y2="700" class="link" marker-end="url(#arr)"/>
+
+  <!-- AI Defense → SaaS (only when on-prem absent) -->
+  <line x1="1050" y1="440" x2="1220" y2="700" class="link-inspect" marker-end="url(#arr)"/>
+
+  <!-- Namespace badge -->
+  <rect x="1200" y="80" width="180" height="26" class="badge"/>
+  <text x="1215" y="98" class="badge-t">Namespace: runai-south</text>
+
+  <!-- Legend -->
+  <rect x="30"  y="875" width="1340" height="35" fill="#fff" stroke="#cfd8dc" stroke-width="1" rx="8" ry="8"/>
+  <line x1="50"  y1="893" x2="90"  y2="893" class="link"/>
+  <text x="98"  y="897" class="subtitle">plain data path</text>
+  <line x1="240" y1="893" x2="280" y2="893" class="link-bulk"/>
+  <text x="288" y="897" class="subtitle">ingestor bulk sync (5 min)</text>
+  <line x1="500" y1="893" x2="540" y2="893" class="link-inspect"/>
+  <text x="548" y="897" class="subtitle">AI Defense inspection</text>
+  <rect x="740" y="885" width="16" height="16" class="box-ext"/>
+  <text x="762" y="897" class="subtitle">external system (dashed border)</text>
+  <rect x="990" y="885" width="16" height="16" class="box-defense"/>
+  <text x="1012" y="897" class="subtitle">AI Defense component (SaaS or on-prem)</text>
+</svg>
