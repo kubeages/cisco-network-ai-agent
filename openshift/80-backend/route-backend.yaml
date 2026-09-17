@@ -1,6 +1,10 @@
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
+  annotations:
+    # /ask can run for minutes; HAProxy's 30s default returns 504 while the backend
+    # is still working on the answer.
+    haproxy.router.openshift.io/timeout: 120s
   labels:
     app: backend-api
     app.kubernetes.io/part-of: gbaia

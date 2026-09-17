@@ -336,7 +336,7 @@ LOCAL_LLM_URL = os.getenv("LOCAL_LLM_URL")
 LOCAL_LLM_TOKEN = os.getenv("LOCAL_LLM_TOKEN")  # Bearer token for authenticated LLM endpoints
 # Model name advertised to the OpenAI-compatible local endpoint. Cluster-portable: defaults
 # to mistral-nemo-12b for the original fp-ocp deployment; the ocpai-02 deployment overrides
-# to qwen3.6-27b. Switch via LOCAL_LLM_MODEL env var in the backend Deployment.
+# to qwen3.8-27b. Switch via LOCAL_LLM_MODEL env var in the backend Deployment.
 LOCAL_LLM_MODEL = os.getenv("LOCAL_LLM_MODEL", "mistral-nemo-12b")
 # Qwen3 family ships in "thinking" mode by default, emitting a <think>...</think> block
 # before the answer — 2-5x latency. Off by default for chat UX; opt-in for cases where
@@ -1578,7 +1578,7 @@ Select the top 1-3 most relevant tool names (comma-separated) that would best an
 
 Selected tools:"""
 
-            selection_response = qa_llm.invoke(tool_selection_prompt)
+            selection_response = await asyncio.to_thread(qa_llm.invoke, tool_selection_prompt)
             selected_names = selection_response.content if hasattr(selection_response, 'content') else str(selection_response)
 
             # Parse LLM response to extract tool names
@@ -1630,7 +1630,7 @@ Selected tools:"""
                 RETURN f.name AS fabric
                 LIMIT 1
                 """
-                tenant_fabric_result = graph.query(tenant_fabric_query)
+                tenant_fabric_result = await asyncio.to_thread(graph.query, tenant_fabric_query)
                 if tenant_fabric_result and len(tenant_fabric_result) > 0:
                     specific_fabric = tenant_fabric_result[0].get('fabric')
                     print(f"📊 Resolved tenant '{tenant_name}' to fabric '{specific_fabric}'")
@@ -1646,7 +1646,7 @@ Selected tools:"""
                 else:
                     # Query all fabrics from Neo4j
                     fabric_query = "MATCH (f:Fabric) RETURN f.name AS fabric"
-                    fabric_result = graph.query(fabric_query)
+                    fabric_result = await asyncio.to_thread(graph.query, fabric_query)
                     fabric_names = [row['fabric'] for row in fabric_result if row.get('fabric')]
                     print(f"📊 Discovered {len(fabric_names)} fabrics from Neo4j: {fabric_names}")
             except Exception as e:
@@ -1773,7 +1773,7 @@ Real-time Data:
 
 Answer:"""
 
-            qa_response = qa_llm.invoke(synthesis_prompt)
+            qa_response = await asyncio.to_thread(qa_llm.invoke, synthesis_prompt)
             answer = qa_response.content if hasattr(qa_response, 'content') else str(qa_response)
 
             return (answer, sources)
@@ -1848,7 +1848,7 @@ async def query_intersight_with_llm(question: str, chat_history: str = "") -> tu
                     try:
                         # First check FabricInterconnect - if the user references an FI by
                         # name we want its FI MOID, not a coincidentally-matching server.
-                        fi_result = graph.query(
+                        fi_result = await asyncio.to_thread(graph.query,
                             "MATCH (f:FabricInterconnect {name: $name}) RETURN f.moid AS moid, f.name AS name LIMIT 1",
                             params={"name": entity_name}
                         )
@@ -1858,7 +1858,7 @@ async def query_intersight_with_llm(question: str, chat_history: str = "") -> tu
                             print(f"🔍 Found FabricInterconnect '{server_name}' with MOID: {fi_moid}")
                             break
 
-                        result = graph.query(
+                        result = await asyncio.to_thread(graph.query,
                             "MATCH (s:IntersightServer {name: $name}) RETURN s.moid AS moid, s.name AS name LIMIT 1",
                             params={"name": entity_name}
                         )
@@ -1878,7 +1878,7 @@ async def query_intersight_with_llm(question: str, chat_history: str = "") -> tu
                     history_entities = re.findall(r"['\"]([^'\"]+)['\"]", chat_history)
                     # Walk in reverse so the most recent mention wins
                     for entity_name in reversed(history_entities):
-                        result = graph.query(
+                        result = await asyncio.to_thread(graph.query,
                             "MATCH (s:IntersightServer {name: $name}) RETURN s.moid AS moid, s.name AS name LIMIT 1",
                             params={"name": entity_name}
                         )
@@ -1983,7 +1983,7 @@ Available tools:
 Return only the tool name, nothing else.
 Selected tool:"""
 
-                selection_response = qa_llm.invoke(tool_selection_prompt)
+                selection_response = await asyncio.to_thread(qa_llm.invoke, tool_selection_prompt)
                 selected_tool_text = selection_response.content if hasattr(selection_response, 'content') else str(selection_response)
 
                 # Parse tool name
@@ -2095,7 +2095,7 @@ Selected tool:"""
             # data so the LLM can answer "what adapters does this server have" properly.
             if server_moid and any(kw in question_lower for kw in ("mac", "vnic", "adapter", "connectivity", "network", "epg", "tenant", "fabric", "attached", "attach")):
                 try:
-                    endpoint_rows = graph.query(
+                    endpoint_rows = await asyncio.to_thread(graph.query,
                         """
                         MATCH (s:IntersightServer {moid: $moid})-[r:CONNECTED_TO]->(e:Endpoint)
                         OPTIONAL MATCH (e)-[:MEMBER_OF]->(epg:EPG)
@@ -2250,7 +2250,7 @@ When the user asks "what is the critical alarm for X":
 
 Answer (be concise and focus on the key information):"""
 
-            qa_response = qa_llm.invoke(synthesis_prompt)
+            qa_response = await asyncio.to_thread(qa_llm.invoke, synthesis_prompt)
             answer = qa_response.content if hasattr(qa_response, 'content') else str(qa_response)
 
             return (answer, sources)
@@ -2274,7 +2274,7 @@ async def query_hybrid(question: str, chat_history: str = "") -> tuple[str, List
     # Step 1: Get topology/relationships from Neo4j
     try:
         cypher_chain = CYPHER_PROMPT | cypher_llm
-        cypher_response = cypher_chain.invoke({
+        cypher_response = await asyncio.to_thread(cypher_chain.invoke, {
             "schema": graph.get_schema,
             "question": question,
             "chat_history": chat_history
@@ -2285,7 +2285,7 @@ async def query_hybrid(question: str, chat_history: str = "") -> tuple[str, List
         # Validate Cypher query
         is_valid, validation_error = validate_cypher_query(clean_cypher)
         if is_valid:
-            neo4j_result = traced_neo4j_query(graph, clean_cypher, "neo4j.cypher.hybrid_query")
+            neo4j_result = await asyncio.to_thread(traced_neo4j_query, graph, clean_cypher, "neo4j.cypher.hybrid_query")
 
             all_sources.append(DataSource(
                 type="neo4j",
@@ -2317,7 +2317,7 @@ Live Data:
 
 Provide a comprehensive answer that integrates both the topology/relationship data and the live operational data:"""
 
-    qa_response = qa_llm.invoke(merge_prompt)
+    qa_response = await asyncio.to_thread(qa_llm.invoke, merge_prompt)
     answer = qa_response.content if hasattr(qa_response, 'content') else str(qa_response)
 
     return (answer, all_sources)
@@ -2338,7 +2338,7 @@ async def ask_agent(query: Query):
     # --- Cisco AI Defense: Inspect user prompt ---
     if AI_DEFENSE_ENABLED and AI_DEFENSE_INSPECT_PROMPTS:
         print("🛡️ Inspecting user prompt with AI Defense...")
-        prompt_result = inspect_with_ai_defense(query.question, role="user")
+        prompt_result = await asyncio.to_thread(inspect_with_ai_defense, query.question, "user")
         security_info.prompt_safe = prompt_result.is_safe
         security_info.prompt_severity = prompt_result.severity
         security_info.prompt_violations = prompt_result.violated_rules
@@ -2360,8 +2360,8 @@ async def ask_agent(query: Query):
             print(f"⚠️ Prompt warning from AI Defense: {prompt_result.violated_rules}")
 
     # --- Check Data Source Capabilities ---
-    capabilities = get_data_source_capabilities()
-    is_feasible, error_msg = validate_query_feasibility(query.question, capabilities)
+    capabilities = await asyncio.to_thread(get_data_source_capabilities)
+    is_feasible, error_msg = await asyncio.to_thread(validate_query_feasibility, query.question, capabilities)
 
     if not is_feasible:
         print(f"⚠️ Query not feasible with current data sources: {error_msg}")
@@ -2373,7 +2373,7 @@ async def ask_agent(query: Query):
         )
 
     # --- Query Classification and Routing ---
-    query_intent = classify_query_intent(query.question)
+    query_intent = await asyncio.to_thread(classify_query_intent, query.question)
     print(f"🔍 Query classified as: {query_intent}")
 
     try:
@@ -2397,7 +2397,7 @@ async def ask_agent(query: Query):
             print("📊 Executing Neo4j-only query...")
             # Step 1: Generate Cypher using the LLM
             cypher_chain = CYPHER_PROMPT | cypher_llm
-            cypher_response = cypher_chain.invoke({
+            cypher_response = await asyncio.to_thread(cypher_chain.invoke, {
                 "schema": graph.get_schema,
                 "question": query.question,
                 "chat_history": history_str
@@ -2416,7 +2416,7 @@ async def ask_agent(query: Query):
                 raise ValueError(f"Invalid Cypher query: {validation_error}")
 
             # Step 4: Execute the Cypher query
-            query_result = traced_neo4j_query(graph, clean_cypher, "neo4j.cypher.user_query")
+            query_result = await asyncio.to_thread(traced_neo4j_query, graph, clean_cypher, "neo4j.cypher.user_query")
             print(f"📊 Query returned {len(query_result)} results")
 
             # Track Neo4j source
@@ -2436,7 +2436,7 @@ async def ask_agent(query: Query):
 
             qa_prompt_dynamic = PromptTemplate.from_template(qa_template)
             qa_chain = qa_prompt_dynamic | qa_llm
-            qa_response = qa_chain.invoke({
+            qa_response = await asyncio.to_thread(qa_chain.invoke, {
                 "context": str(query_result),
                 "question": query.question
             })
@@ -2445,7 +2445,7 @@ async def ask_agent(query: Query):
         # --- Cisco AI Defense: Inspect LLM response ---
         if AI_DEFENSE_ENABLED and AI_DEFENSE_INSPECT_RESPONSES:
             print("🛡️ Inspecting LLM response with AI Defense...")
-            response_result = inspect_with_ai_defense(answer, role="assistant")
+            response_result = await asyncio.to_thread(inspect_with_ai_defense, answer, "assistant")
             security_info.response_safe = response_result.is_safe
             security_info.response_severity = response_result.severity
             security_info.response_violations = response_result.violated_rules
@@ -2517,7 +2517,7 @@ async def ask_agent_stream(query: Query):
             yield f"data: {json.dumps({'status': 'security', 'message': '🛡️ Checking security policies...'})}\n\n"
             await asyncio.sleep(0.1)
 
-            prompt_result = inspect_with_ai_defense(query.question, role="user")
+            prompt_result = await asyncio.to_thread(inspect_with_ai_defense, query.question, "user")
             security_info["prompt_safe"] = prompt_result.is_safe
 
             if prompt_result.action == "block":
@@ -2532,8 +2532,8 @@ async def ask_agent_stream(query: Query):
                 await asyncio.sleep(0.1)
 
         # --- Check Data Source Capabilities ---
-        capabilities = get_data_source_capabilities()
-        is_feasible, error_msg = validate_query_feasibility(query.question, capabilities)
+        capabilities = await asyncio.to_thread(get_data_source_capabilities)
+        is_feasible, error_msg = await asyncio.to_thread(validate_query_feasibility, query.question, capabilities)
 
         if not is_feasible:
             print(f"⚠️ Query not feasible with current data sources")
@@ -2541,7 +2541,7 @@ async def ask_agent_stream(query: Query):
             return
 
         # --- Query Classification and Routing ---
-        query_intent = classify_query_intent(query.question)
+        query_intent = await asyncio.to_thread(classify_query_intent, query.question)
         print(f"🔍 Query classified as: {query_intent} (streaming mode)")
 
         data_sources = []
@@ -2598,7 +2598,7 @@ async def ask_agent_stream(query: Query):
                 await asyncio.sleep(0.1)
 
                 cypher_chain = CYPHER_PROMPT | cypher_llm
-                cypher_response = cypher_chain.invoke({
+                cypher_response = await asyncio.to_thread(cypher_chain.invoke, {
                     "schema": graph.get_schema,
                     "question": query.question,
                     "chat_history": history_str
@@ -2616,7 +2616,7 @@ async def ask_agent_stream(query: Query):
                 yield f"data: {json.dumps({'status': 'querying', 'message': '🔎 Querying the knowledge graph...'})}\n\n"
                 await asyncio.sleep(0.1)
 
-                query_result = traced_neo4j_query(graph, clean_cypher, "neo4j.cypher.user_query")
+                query_result = await asyncio.to_thread(traced_neo4j_query, graph, clean_cypher, "neo4j.cypher.user_query")
                 result_count = len(query_result)
 
                 yield f"data: {json.dumps({'status': 'processing', 'message': f'📊 Found {result_count} results, generating response...'})}\n\n"
@@ -2702,7 +2702,7 @@ async def ask_agent_stream(query: Query):
                 yield f"data: {json.dumps({'status': 'security', 'message': '🛡️ Validating response...'})}\n\n"
                 await asyncio.sleep(0.1)
 
-                response_result = inspect_with_ai_defense(answer, role="assistant")
+                response_result = await asyncio.to_thread(inspect_with_ai_defense, answer, "assistant")
                 security_info["response_safe"] = response_result.is_safe
 
                 if response_result.action == "block":

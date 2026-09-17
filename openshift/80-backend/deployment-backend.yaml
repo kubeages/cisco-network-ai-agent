@@ -41,7 +41,7 @@ spec:
               key: neo4j-password
               name: gbaia-secrets
         - name: LOCAL_LLM_URL
-          value: http://qwen36-27b.runai-shared-models.svc:8000/v1
+          value: http://qwen38-27b.runai-shared-models.svc:80/v1
         - name: LOCAL_LLM_TOKEN
           valueFrom:
             secretKeyRef:
@@ -84,7 +84,7 @@ spec:
         - name: INTERSIGHT_MCP_URL
           value: http://gbaia-intersight-mcp:3000
         - name: LOCAL_LLM_MODEL
-          value: qwen3.6-27b
+          value: qwen3.8-27b
         - name: MCP_TOKEN
           valueFrom:
             secretKeyRef:
@@ -94,7 +94,9 @@ spec:
           value: 'true'
         image: gbaia-backend:latest
         livenessProbe:
-          failureThreshold: 5
+          # Tolerate ~180s of unresponsiveness. /ask can legitimately take minutes on a
+          # large graph result; a tighter budget kills the pod mid-answer.
+          failureThreshold: 12
           httpGet:
             path: /api/health
             port: 8000
@@ -102,22 +104,24 @@ spec:
           initialDelaySeconds: 30
           periodSeconds: 15
           successThreshold: 1
-          timeoutSeconds: 15
+          timeoutSeconds: 10
         name: backend
         ports:
         - containerPort: 8000
           name: http
           protocol: TCP
         readinessProbe:
-          failureThreshold: 3
+          # ~60s before the pod is pulled from the Service. With only 2 replicas, a
+          # twitchy readiness probe can empty the Service and take the UI down.
+          failureThreshold: 6
           httpGet:
             path: /api/health
             port: 8000
             scheme: HTTP
           initialDelaySeconds: 15
-          periodSeconds: 5
+          periodSeconds: 10
           successThreshold: 1
-          timeoutSeconds: 3
+          timeoutSeconds: 5
         resources:
           limits:
             cpu: '1'
