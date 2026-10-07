@@ -1,0 +1,17 @@
+# Replaces the original gbaia-neo4j-data-pvc, which was abandoned on 2026-10-07:
+# the vast-nfs server held orphaned file locks on databases/*/neostore after a node
+# event killed the pod, so Neo4j could never reacquire them (FileLockException on
+# every start, 1366 restarts over ~5 days). The data was copied to this volume and
+# the old PVC left in place as a fallback. Delete it once this one is proven.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  labels:
+    app.kubernetes.io/part-of: gbaia
+  name: gbaia-neo4j-data-pvc-v2
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi

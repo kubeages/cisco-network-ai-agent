@@ -74,7 +74,7 @@ spec:
       volumes:
       - name: neo4j-data
         persistentVolumeClaim:
-          claimName: gbaia-neo4j-data-pvc
+          claimName: gbaia-neo4j-data-pvc-v2
       - name: neo4j-logs
         persistentVolumeClaim:
           claimName: gbaia-neo4j-logs-pvc
