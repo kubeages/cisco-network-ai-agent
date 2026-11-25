@@ -1003,23 +1003,33 @@ def process_intersight_data(driver, mcp_url=None):
             counters["updated_fis"] = 0
             try:
                 network_instance = network_api.NetworkApi(api_client)
-                fi_response = network_instance.get_network_element_summary_list()
-                fis = (fi_response.results if fi_response and hasattr(fi_response, 'results') else []) or []
-                print(f"    Found {len(fis)} fabric interconnects")
+                # Read the raw JSON instead of the SDK's typed model. The SDK validates
+                # every enum client-side and rejects the WHOLE response when Intersight
+                # returns a value it doesn't know yet (seen: OutOfBandIpv6Status
+                # "waiting"), which silently dropped all fabric interconnects.
+                import json as _json
+                fi_raw = network_instance.get_network_element_summary_list(_preload_content=False)
+                fi_rows = (_json.loads(fi_raw.data) or {}).get("Results") or []
+                # The summary list also contains chassis management controllers
+                # (SwitchType "EdgeChassisManagementController"); keep real FIs only.
+                fis = [r for r in fi_rows if (r.get("SwitchType") or "FabricInterconnect") == "FabricInterconnect"]
+                print(f"    Found {len(fis)} fabric interconnects ({len(fi_rows) - len(fis)} other network elements skipped)")
 
                 for fi in fis:
-                    fi_moid = getattr(fi, 'moid', None)
+                    fi_moid = fi.get('Moid')
                     if not fi_moid:
                         continue
 
-                    serial = getattr(fi, 'serial', '') or ''
-                    switch_id = getattr(fi, 'switch_id', '') or ''
-                    dn = getattr(fi, 'dn', '') or ''
-                    model = getattr(fi, 'model', '') or ''
-                    mgmt_ip = (getattr(fi, 'out_of_band_ip_address', '')
-                               or getattr(fi, 'inband_ip_address', '')
-                               or '')
-                    firmware = getattr(fi, 'ucsm_running_firmware', '') or getattr(fi, 'version', '') or ''
+                    serial = fi.get('Serial') or ''
+                    switch_id = fi.get('SwitchId') or ''
+                    dn = fi.get('Dn') or ''
+                    model = fi.get('Model') or ''
+                    mgmt_ip = fi.get('OutOfBandIpAddress') or fi.get('InbandIpAddress') or ''
+                    # First non-empty string wins (some of these are object references
+                    # on other record types, so only accept plain strings).
+                    firmware = next((v for v in (fi.get('BundleVersion'), fi.get('FirmwareVersion'),
+                                                 fi.get('Version'), fi.get('Firmware'))
+                                     if isinstance(v, str) and v), '')
 
                     # Clean friendly name: FI-<Serial>-<SwitchId>. Falls back through Dn,
                     # then a moid-truncated placeholder, so we never emit ugly "sys/switch-A-A".
@@ -1033,15 +1043,14 @@ def process_intersight_data(driver, mcp_url=None):
                         fi_name = f"FI-{fi_moid[:8]}"
 
                     # AlarmSummary
-                    asum = getattr(fi, 'alarm_summary', None)
-                    critical = getattr(asum, 'critical', 0) if asum else 0
-                    warning = getattr(asum, 'warning', 0) if asum else 0
-                    info = getattr(asum, 'info', 0) if asum else 0
+                    asum = fi.get('AlarmSummary') or {}
+                    critical = asum.get('Critical', 0) or 0
+                    warning = asum.get('Warning', 0) or 0
+                    info = asum.get('Info', 0) or 0
                     health = "Critical" if critical else ("Warning" if warning else "Healthy")
 
                     # RegisteredDevice MOID - links the FI to its chassis (same UCS domain)
-                    rd = getattr(fi, 'registered_device', None)
-                    rd_moid = getattr(rd, 'moid', None) if rd else None
+                    rd_moid = (fi.get('RegisteredDevice') or {}).get('Moid')
 
                     res = traced_neo4j_run(
                         db_session,

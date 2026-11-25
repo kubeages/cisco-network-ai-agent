@@ -1200,6 +1200,13 @@ def validate_query_feasibility(question: str, capabilities: dict) -> tuple[bool,
             "\n💡 Try asking about current health, fabrics, or device status instead."
         )
 
+    # A health/"current" question about compute (servers, chassis, FIs) is answered
+    # from Intersight, not Nexus Dashboard - don't refuse it when ND is down.
+    _compute_keywords = ("server", "ucs", "compute", "blade", "rack unit", "chassis",
+                         "fabric interconnect", "intersight", "vnic", "adapter")
+    if capabilities.get('intersight_available') and any(kw in question_lower for kw in _compute_keywords):
+        targets_intersight_server = True
+
     # Check for ND/MCP-specific queries (skip when the question targets a known
     # IntersightServer - we can answer from Intersight + Neo4j without ND).
     if not targets_intersight_server and (
@@ -1785,6 +1792,173 @@ Answer:"""
         return (f"Error querying real-time data: {str(e)}", [])
 
 
+# Token budget for Intersight tool results handed to the model. The old value
+# (1200) was sized for Mistral Nemo's 8k context; raise or lower it to match the
+# deployed model via the INTERSIGHT_MAX_RESULT_TOKENS env var.
+INTERSIGHT_MAX_RESULT_TOKENS = int(os.getenv("INTERSIGHT_MAX_RESULT_TOKENS", "20000"))
+
+# Bookkeeping fields that carry no meaning for an operator question.
+_INTERSIGHT_NOISE_KEYS = {
+    "ClassId", "ObjectType", "AccountMoid", "DomainGroupMoid", "CreateTime", "ModTime",
+    "SharedScope", "Ancestors", "Owners", "PermissionResources", "CustomPermissionResources",
+    "Tags", "Parent", "DisplayNames", "VersionContext", "DeviceMoId", "HardwareUuid", "Uuid",
+    "MsAffectedObject", "AncestorMoId", "AncestorMoType", "AlarmSummaryAggregators",
+}
+
+# Fields kept per row when a list is long. Short lists (a few rows) keep every
+# meaningful scalar instead, so single-entity questions lose no detail.
+_INTERSIGHT_ROW_FIELDS = {
+    "server": ["Name", "Model", "Serial", "Moid", "OperPowerState", "SourceObjectType", "PlatformType",
+               "ManagementMode", "Firmware", "NumCpus", "NumCpuCores", "NumThreads", "CpuCapacity",
+               "TotalMemory", "AvailableMemory", "ChassisId", "SlotId", "ServerId", "MgmtIpAddress",
+               "UserLabel", "Lifecycle", "Presence"],
+    "chassis": ["Name", "Model", "Serial", "Moid", "ChassisId", "OperState", "ConnectionStatus",
+                "ManagementMode", "ProductName", "UserLabel", "Blades", "Ioms", "Fanmodules", "Psus"],
+    "fabric_interconnect": ["Name", "Dn", "Model", "Serial", "Moid", "SwitchId", "SwitchType", "Operability",
+                            "OutOfBandIpAddress", "InbandIpAddress", "Version", "BundleVersion", "Firmware",
+                            "ManagementMode", "EthernetSwitchingMode", "FcSwitchingMode",
+                            "InterClusterLinkState", "SwitchProfileName", "Thermal"],
+    "alarm": ["Severity", "Code", "Name", "Description", "AffectedMoDisplayName", "AffectedMoType",
+              "AffectedMoId", "CreationTime", "LastTransitionTime", "Acknowledge", "Suppressed"],
+}
+# Columns worth counting for the authoritative summary block.
+_INTERSIGHT_SUMMARY_KEYS = ["Model", "Health", "OperPowerState", "SourceObjectType", "SwitchType",
+                            "Operability", "OperState", "Severity", "AffectedMoType", "ManagementMode"]
+_INTERSIGHT_FULL_DETAIL_ROWS = 3
+
+
+def _intersight_row_kind(tool_name: str) -> Optional[str]:
+    t = tool_name.lower()
+    if "alarm" in t:
+        return "alarm"
+    if "fabric_interconnect" in t or "network_element" in t:
+        return "fabric_interconnect"
+    if "chassis" in t:
+        return "chassis"
+    if any(kw in t for kw in ("server", "blade", "rack_unit")):
+        return "server"
+    return None
+
+
+def _compact_intersight_row(row: dict, fields: Optional[List[str]] = None) -> dict:
+    """Reduce one Intersight object to meaningful scalars.
+
+    Object references ({Moid, link, ...}) are dropped, lists become their length,
+    AlarmSummary is flattened to Health / CriticalAlarms / WarningAlarms / InfoAlarms.
+    With `fields`, only those keys are kept (plus the alarm summary).
+    """
+    out = {}
+    keys = fields if fields is not None else [k for k in row.keys() if k not in _INTERSIGHT_NOISE_KEYS]
+    for k in keys:
+        if k == "AlarmSummary" or k not in row:
+            continue
+        v = row[k]
+        if v is None or v == "":
+            continue
+        if isinstance(v, (str, int, float, bool)):
+            out[k] = v.strip() if isinstance(v, str) else v
+        elif isinstance(v, list):
+            if v:
+                out[f"{k}Count"] = len(v)
+        # dicts are object references or nested config blobs - not useful per row
+    asum = row.get("AlarmSummary")
+    if isinstance(asum, dict):
+        if asum.get("Health"):
+            out["Health"] = asum["Health"]
+        out["CriticalAlarms"] = asum.get("Critical", 0)
+        out["WarningAlarms"] = asum.get("Warning", 0)
+        out["InfoAlarms"] = asum.get("Info", 0)
+    return out
+
+
+def _strip_intersight_noise(obj):
+    """Recursively drop bookkeeping keys and object references from a non-list result."""
+    if isinstance(obj, dict):
+        if "link" in obj and "Moid" in obj:
+            return None
+        cleaned = {}
+        for k, v in obj.items():
+            if k in _INTERSIGHT_NOISE_KEYS:
+                continue
+            v = _strip_intersight_noise(v)
+            if v is None or v == "" or v == [] or v == {}:
+                continue
+            cleaned[k] = v
+        return cleaned
+    if isinstance(obj, list):
+        items = [_strip_intersight_noise(i) for i in obj]
+        return [i for i in items if i not in (None, "", [], {})]
+    return obj
+
+
+def shape_intersight_result(tool_name: str, result, max_tokens: int, count_tokens) -> tuple:
+    """Turn a raw Intersight MCP response into compact text for the model.
+
+    Returns (text, note). For list results the text starts with a RESULT SUMMARY
+    whose counts are computed here over ALL rows, followed by one compact JSON
+    object per row. If the rows exceed the budget, whole rows are dropped from the
+    end and the note says how many are shown - the summary still covers them all.
+    """
+    inner = result.get("result") if isinstance(result, dict) else None
+    rows = inner.get("Results") if isinstance(inner, dict) else None
+
+    if not isinstance(rows, list):
+        # Single object (get_server_details, telemetry, reports ...)
+        payload = _strip_intersight_noise(inner if inner is not None else result)
+        text = json.dumps(payload, indent=1, default=str)
+        note = ""
+        if count_tokens(text) > max_tokens:
+            left, right = 0, len(text)
+            while left < right:
+                mid = (left + right + 1) // 2
+                if count_tokens(text[:mid]) <= max_tokens:
+                    left = mid
+                else:
+                    right = mid - 1
+            text = text[:left] + "\n... (truncated due to size)"
+            note = "\n\nNote: the result above was truncated to fit the model's budget."
+        return text, note
+
+    dict_rows = [r for r in rows if isinstance(r, dict)]
+    kind = _intersight_row_kind(tool_name)
+    fields = _INTERSIGHT_ROW_FIELDS.get(kind) if len(dict_rows) > _INTERSIGHT_FULL_DETAIL_ROWS else None
+    compact = [_compact_intersight_row(r, fields) for r in dict_rows]
+
+    summary = [f"RESULT SUMMARY (computed over all rows - authoritative for counts):", f"- total rows: {len(compact)}"]
+    for key in _INTERSIGHT_SUMMARY_KEYS:
+        values = [str(r[key]) for r in compact if key in r]
+        if not values:
+            continue
+        counts = {}
+        for v in values:
+            counts[v] = counts.get(v, 0) + 1
+        if len(counts) > 25:
+            continue
+        ordered = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+        summary.append(f"- by {key}: " + ", ".join(f"{v}={c}" for v, c in ordered))
+    for key, label in (("CriticalAlarms", "critical"), ("WarningAlarms", "warning")):
+        if any(key in r for r in compact):
+            affected = [r for r in compact if r.get(key)]
+            summary.append(f"- rows with {label} alarms: {len(affected)} (total {label} alarms: {sum(r.get(key, 0) for r in affected)})")
+    header = "\n".join(summary) + "\n\nROWS (one JSON object per line):\n"
+
+    lines = [json.dumps(r, separators=(",", ":"), default=str) for r in compact]
+    budget = max_tokens - count_tokens(header)
+    kept, used = [], 0
+    for line in lines:
+        cost = count_tokens(line) + 1
+        if used + cost > budget:
+            break
+        kept.append(line)
+        used += cost
+    note = ""
+    if len(kept) < len(lines):
+        print(f"⚠️  Intersight result too large: showing {len(kept)}/{len(lines)} rows within {max_tokens} tokens")
+        note = (f"\n\nNote: only the first {len(kept)} of {len(lines)} rows are listed above to fit the "
+                f"model's budget. The RESULT SUMMARY counts cover all {len(lines)} rows.")
+    return header + "\n".join(kept), note
+
+
 async def query_intersight_with_llm(question: str, chat_history: str = "") -> tuple[str, List[DataSource]]:
     """
     Query Cisco Intersight for compute/server information via MCP HTTP server.
@@ -1807,18 +1981,16 @@ async def query_intersight_with_llm(question: str, chat_history: str = "") -> tu
             tools_data = tools_response.json()
             tools = [t["name"] for t in tools_data.get("tools", [])]
 
-            # Globally exclude MCP tools known to be broken in the deployed Intersight
-            # MCP version (1.0.16). These GET-by-MOID tools all receive 'undefined' for
-            # the moid argument no matter how we pass it, then return HTTP 404. Letting
-            # the LLM pick any of them produces the "Cannot execute the request. The
-            # requested object 'undefined' does not exist" error users see in chat.
-            # See memory/project_intersight_mcp_bugs.md for the diagnosis.
-            BROKEN_MCP_TOOLS = {
-                "get_server_details",
-                "get_server_profile",
-                "get_server_telemetry",
-            }
-            tools = [t for t in tools if t not in BROKEN_MCP_TOOLS]
+            # Which tools need an object id (moid / serverMoid / chassisMoid ...) as
+            # input. They can only be called when we have resolved that id; picking
+            # one without it returns 404 "object 'undefined' does not exist".
+            tool_params = {t["name"]: set((t.get("parameters") or {}).keys()) for t in tools_data.get("tools", [])}
+            MOID_TOOLS = {name for name, params in tool_params.items() if any("moid" in p.lower() for p in params)}
+            # Tools we can feed with the server MOID resolved from Neo4j, and the
+            # parameter name each expects.
+            SERVER_MOID_TOOLS = {"get_server_details": "moid", "get_server_telemetry": "serverMoid"}
+            # get_server_profile needs a server *profile* MOID, which we do not track.
+            tools = [t for t in tools if t != "get_server_profile"]
 
             if not tools:
                 return ("No Intersight tools available.", [])
@@ -1930,6 +2102,11 @@ async def query_intersight_with_llm(question: str, chat_history: str = "") -> tu
                 candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["fabric_interconnect", "network_element"])]
                 if not candidate_tools:
                     candidate_tools = [t for t in tools if "fabric" in t.lower() and "interconnect" in t.lower()]
+            # Chassis inventory (no specific server): there is a dedicated tool. Without
+            # this branch "UCS chassis" fell into the generic server branch and the
+            # model picked list_compute_blades.
+            elif "chassis" in question_lower and not server_moid and "list_chassis" in tools:
+                candidate_tools = ["list_chassis"]
             # NOTE: get_server_details, get_server_profile, and get_server_telemetry are
             # broken in the Intersight MCP server (1.0.16) - they receive `undefined` for the
             # MOID regardless of how it's passed and return HTTP 404. Until upstream is fixed,
@@ -1943,12 +2120,20 @@ async def query_intersight_with_llm(question: str, chat_history: str = "") -> tu
             # This avoids the broken telemetry tool while still answering the question.
             elif server_moid and ("cpu" in question_lower or "memory" in question_lower or "health" in question_lower or "hardware" in question_lower or "temperature" in question_lower):
                 candidate_tools = [t for t in tools if "list" in t.lower() and "server" in t.lower() and "profile" not in t.lower()]
-            # Health/telemetry queries WITHOUT a specific server (whole-fleet view)
+            # Health/telemetry queries WITHOUT a specific server (whole-fleet view).
+            # The telemetry/statistics tools are all per-object (they need a MOID), so
+            # a fleet question is answered from the inventory list: every row carries
+            # AlarmSummary.Health plus CPU / memory capacity.
             elif "health" in question_lower or "telemetry" in question_lower or "cpu" in question_lower or "memory" in question_lower or "temperature" in question_lower:
-                candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["health", "telemetry", "statistics"])]
+                candidate_tools = [t for t in tools if t == "list_compute_servers"] or \
+                    [t for t in tools if "list" in t.lower() and "server" in t.lower() and "profile" not in t.lower()]
             # Server/compute keywords
             elif "server" in question_lower or "ucs" in question_lower or "compute" in question_lower or "blade" in question_lower or "rack" in question_lower:
                 candidate_tools = [t for t in tools if any(kw in t.lower() for kw in ["server", "compute", "blade", "rack"]) and "profile" not in t.lower()]
+                # Unless the user narrows it to blades / rack units / boards, the
+                # combined server list is the right answer - don't let the model guess.
+                if "list_compute_servers" in candidate_tools and not any(kw in question_lower for kw in ("blade", "rack", "board")):
+                    candidate_tools = ["list_compute_servers"]
             # Network adapter / vNIC / connectivity questions for a SPECIFIC known server:
             # The vnic/adapter MCP tools are all GET-by-MOID and broken (return 404
             # 'undefined'), and list_vnics needs a lanConnectivityPolicyMoid we don't have.
@@ -1968,8 +2153,16 @@ async def query_intersight_with_llm(question: str, chat_history: str = "") -> tu
                 # Default: list servers
                 candidate_tools = [t for t in tools if "list" in t.lower() and "server" in t.lower() and "profile" not in t.lower()]
 
+            # Never offer a tool whose required object id we cannot supply.
+            candidate_tools = [
+                t for t in candidate_tools
+                if t not in MOID_TOOLS or (server_moid and t in SERVER_MOID_TOOLS)
+            ]
+
             if not candidate_tools:
-                candidate_tools = tools[:5]  # Fallback to first 5 tools
+                # Safe fallback: the fleet inventory list needs no inputs.
+                candidate_tools = [t for t in tools if t == "list_compute_servers"] or \
+                    [t for t in tools if t not in MOID_TOOLS][:5]
 
             # Use LLM to select best tool
             if len(candidate_tools) > 1:
@@ -2006,16 +2199,12 @@ Selected tool:"""
             # Add server MOID to tool arguments if found
             if server_moid:
                 # Pass MOID to get/query tools (e.g. get_server_details, get_server_telemetry)
-                if any(kw in selected_tool.lower() for kw in ["get_server", "get_compute", "health", "telemetry", "statistics", "detail"]):
-                    # get_server_telemetry uses serverMoid, others use moid
-                    if "telemetry" in selected_tool.lower():
-                        tool_arguments["serverMoid"] = server_moid
-                    else:
-                        tool_arguments["moid"] = server_moid
+                if selected_tool in SERVER_MOID_TOOLS:
+                    tool_arguments[SERVER_MOID_TOOLS[selected_tool]] = server_moid
                     print(f"📋 Passing server MOID to tool: {server_moid}")
                 # For list_alarms with a server MOID, filter by AffectedMoid
                 elif "alarm" in selected_tool.lower():
-                    tool_arguments["filter"] = f"AffectedMoid eq '{server_moid}'"
+                    tool_arguments["filter"] = f"AffectedMoId eq '{server_moid}'"
                     print(f"📋 Filtering alarms by AffectedMoid: {server_moid}")
                 # For list tools, use filter parameter with server name (MCP often ignores this
                 # but harmless to try as a hint)
@@ -2051,7 +2240,11 @@ Selected tool:"""
             # Execute tool
             execute_response = await client.post(
                 f"{INTERSIGHT_MCP_URL}/api/execute",
-                json={"tool": selected_tool, "arguments": tool_arguments},
+                # The Intersight MCP HTTP API reads tool inputs from "parameters".
+                # Sending them as "arguments" (the MCP JSON-RPC name) made the server
+                # run every tool with no inputs: filters were ignored and get-by-MOID
+                # tools queried the literal id 'undefined'.
+                json={"tool": selected_tool, "parameters": tool_arguments},
                 timeout=60.0
             )
 
@@ -2077,7 +2270,9 @@ Selected tool:"""
                         for row in all_rows:
                             row_moid = row.get("Moid")
                             row_name = (row.get("Name") or "").lower()
-                            row_affected = (row.get("AffectedMoid") or "") if isinstance(row.get("AffectedMoid"), str) else ""
+                            row_affected = row.get("AffectedMoId") or row.get("AffectedMoid") or ""
+                            if not isinstance(row_affected, str):
+                                row_affected = ""
                             if target_moid and (row_moid == target_moid or row_affected == target_moid):
                                 filtered.append(row)
                             elif target_name_lower and row_name == target_name_lower:
@@ -2088,6 +2283,30 @@ Selected tool:"""
                             inner["Results"] = filtered
                 except Exception as e:
                     print(f"⚠️ Post-filter failed (continuing with raw result): {e}")
+
+            # Fabric interconnect rows from the MCP are network.Element objects: their
+            # Name is null and the firmware is only an object reference. The ingestor
+            # stores both (friendly name + bundle firmware) on the FabricInterconnect
+            # node, so fill them in from Neo4j, matched by serial number.
+            if "fabric_interconnect" in selected_tool.lower() or "network_element" in selected_tool.lower():
+                try:
+                    inner = result.get("result") if isinstance(result, dict) else None
+                    fi_rows = inner.get("Results") if isinstance(inner, dict) else None
+                    if isinstance(fi_rows, list) and fi_rows:
+                        known = await asyncio.to_thread(graph.query,
+                            "MATCH (f:FabricInterconnect) RETURN f.serial AS serial, f.name AS name, f.firmware AS firmware"
+                        )
+                        by_serial = {k["serial"]: k for k in (known or []) if k.get("serial")}
+                        for row in fi_rows:
+                            match = by_serial.get(row.get("Serial")) if isinstance(row, dict) else None
+                            if not match:
+                                continue
+                            if not row.get("Name") and match.get("name"):
+                                row["Name"] = match["name"]
+                            if not row.get("Firmware") and match.get("firmware"):
+                                row["Firmware"] = match["firmware"]
+                except Exception as e:
+                    print(f"⚠️ Fabric interconnect enrichment failed (continuing): {e}")
 
             # Enrich with Neo4j-correlated endpoints for adapter/connectivity questions about
             # a known server. The MCP doesn't expose a per-server host-eth-interface tool, but
@@ -2137,16 +2356,15 @@ Selected tool:"""
                     details={"server": server_name or server_moid}
                 ))
 
-            # Truncate result to fit token budget
-            # Same headroom-for-Mistral reasoning as MAX_RESULT_TOKENS in the ND path:
-            # Mistral's tokenizer is ~5x denser on JSON than cl100k_base estimates.
-            # 1200 cl100k = ~5900 Mistral, leaving ~2300 tokens for chat template + answer.
-            MAX_INTERSIGHT_TOKENS = 1200
-            result_json = json.dumps(result, indent=2)
-
+            # Shape the result for the model. The MCP returns full Intersight objects
+            # (~1,900 tokens per server, ~99k for the fleet list). Cutting that raw
+            # JSON to a small budget left the model with less than one row, so it
+            # answered "1 server" for a fleet of 52. Instead: reduce each row to the
+            # fields that matter, compute the counts in Python, and only then apply
+            # the token budget (dropping whole rows, never half of one).
             try:
                 encoding = tiktoken.get_encoding("cl100k_base")
-            except:
+            except Exception:
                 encoding = None
 
             def count_tokens(text: str) -> int:
@@ -2155,23 +2373,9 @@ Selected tool:"""
                 else:
                     return len(text) // 4
 
-            result_tokens = count_tokens(result_json)
-            truncation_note = ""
-
-            if result_tokens > MAX_INTERSIGHT_TOKENS:
-                print(f"⚠️  Intersight result too large ({result_tokens} tokens), truncating to {MAX_INTERSIGHT_TOKENS}")
-
-                # Binary search to find truncation point
-                left, right = 0, len(result_json)
-                while left < right:
-                    mid = (left + right + 1) // 2
-                    if count_tokens(result_json[:mid]) <= MAX_INTERSIGHT_TOKENS:
-                        left = mid
-                    else:
-                        right = mid - 1
-
-                result_json = result_json[:left] + "\n... (truncated due to size)"
-                truncation_note = f"\n\nNote: Result truncated from {result_tokens} to ~{MAX_INTERSIGHT_TOKENS} tokens."
+            result_json, truncation_note = shape_intersight_result(
+                selected_tool, result, INTERSIGHT_MAX_RESULT_TOKENS, count_tokens
+            )
 
             # Synthesize answer from tool result.
             # Build an explicit "matched entity" header so smaller models (Mistral
@@ -2220,33 +2424,21 @@ Question: {question}{matched_entity_note}{aci_attachment_block}
 Intersight Data:
 {result_json}{truncation_note}
 
-LIVE TELEMETRY ABSENCE - The tool used (`list_compute_servers` or
-`list_fabric_interconnects`) returns the inventory record only: it includes
-CpuCapacity (max GHz available), NumCpuCores, NumThreads, TotalMemory (MB installed),
-AvailableMemory (MB free), OperPowerState, AlarmSummary (counts of
-critical/warning/info alarms). It does NOT include live CPU %, live memory usage %,
-temperature, fan RPM, or power draw - those come from a separate telemetry endpoint
-that is not currently reachable.
-When the user asks about LIVE or CURRENT CPU/memory usage, temperature, or power
-consumption, do NOT say "data is missing" as if it were a database gap. Instead:
-  1. State explicitly that live performance telemetry isn't available through this
-     query path right now,
-  2. Report what IS in the inventory record (capacity, cores, total/available memory,
-     power state, alarm summary),
-  3. Suggest checking the Intersight UI (intersight.com) for the real-time graph if
-     they need live values.
-
-ALARM ATTRIBUTION LIMITATION - The `AlarmSummary` field on the inventory record is
-RELIABLE: if it says Critical=1, that entity has exactly 1 critical alarm. The
-fleet-wide `list_alarms` tool, however, returns alarm rows with AffectedMoid and
-AffectedObject.Name fields blanked out, so we cannot enumerate the per-alarm details
-(description, cause, severity, when raised) scoped to a specific server or FI.
-When the user asks "what is the critical alarm for X":
-  1. State the count from AlarmSummary (e.g. "X has 1 critical alarm and 0 warning").
-  2. Explain that per-alarm description text is not available through the Intersight
-     MCP at this time; the alarm details (description, cause, recommended action) can
-     be seen in the Intersight UI under the device's Alarms tab.
-  3. Do NOT respond "no critical alarm exists" when AlarmSummary.Critical > 0.
+HOW TO READ THE DATA
+- For a list, the data starts with a RESULT SUMMARY. Its counts were computed over
+  every row and are authoritative: use them for "how many" questions instead of
+  counting rows yourself, and never report a smaller total because fewer rows are
+  listed.
+- Each row is one object. `Health`, `CriticalAlarms`, `WarningAlarms` and
+  `InfoAlarms` come from that object's AlarmSummary and are reliable.
+- Memory fields (`TotalMemory`, `AvailableMemory`) are as reported by Intersight;
+  `CpuCapacity` is capacity, not current usage.
+- Inventory rows do not contain live CPU %, memory usage %, temperature, fan speed
+  or power draw. If the user asks for those and the data does not contain them,
+  say so plainly, report what the data does contain, and point to the Intersight
+  UI for live graphs. Do not present capacity as usage.
+- If a row named in the question is present, answer from it; never say it is
+  missing.
 
 Answer (be concise and focus on the key information):"""
 
