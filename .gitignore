@@ -74,3 +74,6 @@ openshift/intersight-private-key*
 generate_assets.py
 gfx/
 .venv-gfx/
+# Local env backups (contain secrets)
+.env.*
+!.env.example

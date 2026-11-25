@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Deploy gbaia (NAIA) + ND-MCP + Intersight-MCP to an OpenShift cluster.
 #
-#   Usage:  ./deploy.sh [path/to/.env]   (default: ./.env)
+#   Usage:  ./deploy.sh [path/to/.env]   (default: ../.env — the repo-root .env)
 #
 # Pre-reqs:
 #   - `oc` logged in (`oc whoami`).
-#   - .env present (copy from .env.example and fill in).
+#   - .env present in the repo root (copy openshift/.env.example to ../.env and fill in).
 #   - Intersight PEM at $INTERSIGHT_PRIVATE_KEY_FILE if you want Intersight ingestion.
 #
 # Idempotent: safe to re-run. Existing secrets/manifests are updated in place;
@@ -14,12 +14,12 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-ENV_FILE="${1:-.env}"
+ENV_FILE="${1:-../.env}"
 SKIP_BUILDS=0
 [[ "${2:-}" == "--skip-builds" ]] && SKIP_BUILDS=1
 
 if [[ ! -f "$ENV_FILE" ]]; then
-  echo "ERROR: $ENV_FILE not found. Copy .env.example to .env first." >&2
+  echo "ERROR: $ENV_FILE not found. Copy openshift/.env.example to the repo-root .env first." >&2
   exit 1
 fi
 # shellcheck disable=SC1090
@@ -117,6 +117,13 @@ if [[ -n "${LOCAL_LLM_URL:-}" ]]; then
       LOCAL_LLM_URL="$LOCAL_LLM_URL" \
       LOCAL_LLM_MODEL="${LOCAL_LLM_MODEL:-qwen3.8-27b}" >/dev/null
   ok "backend LOCAL_LLM_URL → $LOCAL_LLM_URL"
+fi
+if [[ -n "${AI_DEFENSE_ENDPOINT:-}" ]]; then
+  oc -n "$NAMESPACE" set env deploy/gbaia-backend \
+      AI_DEFENSE_ENABLED="${AI_DEFENSE_ENABLED:-true}" \
+      AI_DEFENSE_ENDPOINT="$AI_DEFENSE_ENDPOINT" \
+      AI_DEFENSE_USE_POLICY="${AI_DEFENSE_USE_POLICY:-true}" >/dev/null
+  ok "backend AI_DEFENSE_ENDPOINT → $AI_DEFENSE_ENDPOINT"
 fi
 if [[ -n "${BACKEND_EXTERNAL_URL:-}" ]]; then
   oc -n "$NAMESPACE" set env deploy/gbaia-frontend \

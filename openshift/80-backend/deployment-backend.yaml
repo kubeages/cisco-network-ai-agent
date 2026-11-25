@@ -41,7 +41,7 @@ spec:
               key: neo4j-password
               name: gbaia-secrets
         - name: LOCAL_LLM_URL
-          value: http://qwen38-27b.runai-shared-models.svc:80/v1
+          value: http://qwen38-27b-02.runai-shared-models.svc:80/v1
         - name: LOCAL_LLM_TOKEN
           valueFrom:
             secretKeyRef:
@@ -51,9 +51,9 @@ spec:
         - name: SPLUNK_OBSERVABILITY_ENABLED
           value: 'false'
         - name: AI_DEFENSE_ENABLED
-          value: 'false'
+          value: 'true'
         - name: AI_DEFENSE_ENDPOINT
-          value: https://us.api.inspect.aidefense.security.cisco.com
+          value: http://ai-defense-apigateway.ai-defense-onprem.svc:8080
         - name: AI_DEFENSE_API_KEY
           valueFrom:
             secretKeyRef:

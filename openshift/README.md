@@ -11,14 +11,14 @@ Numeric prefixes set apply-order for `oc apply -R -f openshift/`.
 openshift/
 ├── 30-neo4j/                    knowledge graph (PVCs + Deployment + Service)
 ├── 40-nd-mcp-postgres/          ND-MCP state store
-├── 50-nd-mcp-server/            ND-MCP server (BC, IS, Deploy, Svc, Route)
+├── 50-nd-mcp-server/            ND-MCP server (BC, IS, Deploy, Svc — no Route: its admin API has no auth, keep it cluster-internal)
 ├── 55-nd-mcp-webui/             optional admin UI (BC + IS + Svc; build currently fails — not critical)
 ├── 60-intersight-mcp/           Intersight MCP server
 ├── 70-ingestor/                 APIC/ND/Intersight → Neo4j ingestor (BC + IS + Deploy)
 ├── 80-backend/                  FastAPI app (BC + IS + Deploy + Svc + Route + config PVC)
 ├── 90-frontend/                 Gradio UI  (BC + IS + Deploy + Svc + Route)
 ├── deploy.sh                    one-shot bring-up: ns, secrets, manifests, builds
-├── .env.example                 → copy to .env, fill in, then run deploy.sh
+├── .env.example                 → copy to the repo-root .env, fill in, then run deploy.sh
 └── README.md                    (this file)
 ```
 
@@ -30,8 +30,8 @@ That makes the manifests namespace- and cluster-portable.
 ## One-shot deploy
 
 ```bash
-cp openshift/.env.example openshift/.env
-# edit openshift/.env — set namespace, APIC + ND creds, optional LLM endpoint, etc.
+cp openshift/.env.example .env
+# edit .env (repo root) — set namespace, APIC + ND creds, optional LLM endpoint, etc.
 # if you want Intersight ingestion, save the PEM private key locally and point
 # INTERSIGHT_PRIVATE_KEY_FILE at it.
 
@@ -57,7 +57,7 @@ The manifests reference these by name; values stay out of git.
 
 ## Cluster-specific knobs to verify before first deploy
 
-These default to the values that work on the `runai-south` ns of the
+These default to the values that work on the `runai-gbaia` ns of the
 `ocpai-02` cluster. Change in `.env` before running `deploy.sh`:
 
 | `.env` var | Where it lands | Why it varies per cluster |
